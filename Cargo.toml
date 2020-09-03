@@ -1,0 +1,11 @@
+[package]
+name = "evm-trace-extract"
+version = "0.1.0"
+authors = ["Thegaram <th307q@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+lazy_static = "1.4.0"
+rayon = "1.4.0"
+regex = "1"
+rocksdb = "0.15.0"
