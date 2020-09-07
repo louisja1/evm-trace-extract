@@ -93,13 +93,6 @@ fn tx_infos(db: &DB, block: u64) -> Vec<TransactionInfo> {
     .collect()
 }
 
-// #[derive(Default)]
-// struct ConflictStats {
-//     num_conflicting_pairs,
-//     num_conflicts,
-
-// }
-
 fn check_block_conflicts(block_number: u64, tx_infos: Vec<TransactionInfo>, detailed: bool) -> i32 {
     let num_txs = tx_infos.len();
 
@@ -109,17 +102,24 @@ fn check_block_conflicts(block_number: u64, tx_infos: Vec<TransactionInfo>, deta
     );
 
     if num_txs == 0 {
-        println!("Empty block, no conflicts\n");
+        // println!("Empty block, no conflicts\n");
+        println!("{};0;0;0", block_number);
         return 0;
     }
 
     if num_txs == 1 {
-        println!("Singleton block, no conflicts\n");
+        // println!("Singleton block, no conflicts\n");
+        println!("{};0;0;0", block_number);
         return 0;
     }
 
     let mut num_conflicting_pairs = 0;
-    let mut num_conflicts = 0;
+    let mut num_conflicting_pairs_balance = 0;
+    let mut num_conflicting_pairs_storage = 0;
+
+    let mut num_conflicts_in_block = 0;
+    let mut num_balance_conflicts_in_block = 0;
+    let mut num_storage_conflicts_in_block = 0;
 
     for ii in 0..(num_txs - 1) {
         for jj in (ii + 1)..num_txs {
@@ -134,7 +134,8 @@ fn check_block_conflicts(block_number: u64, tx_infos: Vec<TransactionInfo>, deta
             let mut num_storage_rw_conflicts = 0;
             let mut num_storage_ww_conflicts = 0;
 
-            let mut conflicting = false;
+            let mut balance_conflict = false;
+            let mut storage_conflict = false;
 
             for access in &tx_a.accesses {
                 match access {
@@ -146,10 +147,11 @@ fn check_block_conflicts(block_number: u64, tx_infos: Vec<TransactionInfo>, deta
                             target: Target::Balance(addr.clone()),
                             mode: AccessMode::Write,
                         }) {
-                            num_conflicts += 1;
+                            num_conflicts_in_block += 1;
+                            num_balance_conflicts_in_block += 1;
                             num_balance_conflicts += 1;
                             num_balance_rw_conflicts += 1;
-                            conflicting = true;
+                            balance_conflict = true;
                         }
                     }
                     Access {
@@ -160,20 +162,22 @@ fn check_block_conflicts(block_number: u64, tx_infos: Vec<TransactionInfo>, deta
                             target: Target::Balance(addr.clone()),
                             mode: AccessMode::Read,
                         }) {
-                            num_conflicts += 1;
+                            num_conflicts_in_block += 1;
+                            num_balance_conflicts_in_block += 1;
                             num_balance_conflicts += 1;
                             num_balance_rw_conflicts += 1;
-                            conflicting = true;
+                            balance_conflict = true;
                         }
 
                         if tx_b.accesses.contains(&Access {
                             target: Target::Balance(addr.clone()),
                             mode: AccessMode::Write,
                         }) {
-                            num_conflicts += 1;
+                            num_conflicts_in_block += 1;
+                            num_balance_conflicts_in_block += 1;
                             num_balance_conflicts += 1;
                             num_balance_ww_conflicts += 1;
-                            conflicting = true;
+                            balance_conflict = true;
                         }
                     }
                     Access {
@@ -184,10 +188,11 @@ fn check_block_conflicts(block_number: u64, tx_infos: Vec<TransactionInfo>, deta
                             target: Target::Storage(addr.clone(), entry.clone()),
                             mode: AccessMode::Write,
                         }) {
-                            num_conflicts += 1;
+                            num_conflicts_in_block += 1;
+                            num_storage_conflicts_in_block += 1;
                             num_storage_conflicts += 1;
                             num_storage_rw_conflicts += 1;
-                            conflicting = true;
+                            storage_conflict = true;
                         }
                     }
                     Access {
@@ -198,26 +203,36 @@ fn check_block_conflicts(block_number: u64, tx_infos: Vec<TransactionInfo>, deta
                             target: Target::Storage(addr.clone(), entry.clone()),
                             mode: AccessMode::Read,
                         }) {
-                            num_conflicts += 1;
+                            num_conflicts_in_block += 1;
+                            num_storage_conflicts_in_block += 1;
                             num_storage_conflicts += 1;
                             num_storage_rw_conflicts += 1;
-                            conflicting = true;
+                            storage_conflict = true;
                         }
 
                         if tx_b.accesses.contains(&Access {
                             target: Target::Storage(addr.clone(), entry.clone()),
                             mode: AccessMode::Write,
                         }) {
-                            num_conflicts += 1;
+                            num_conflicts_in_block += 1;
+                            num_storage_conflicts_in_block += 1;
                             num_storage_conflicts += 1;
                             num_storage_ww_conflicts += 1;
-                            conflicting = true;
+                            storage_conflict = true;
                         }
                     }
                 }
             }
 
-            if conflicting {
+            if balance_conflict {
+                num_conflicting_pairs_balance += 1;
+            }
+
+            if storage_conflict {
+                num_conflicting_pairs_storage += 1;
+            }
+
+            if balance_conflict || storage_conflict {
                 num_conflicting_pairs += 1;
 
                 if detailed {
@@ -237,14 +252,29 @@ fn check_block_conflicts(block_number: u64, tx_infos: Vec<TransactionInfo>, deta
         }
     }
 
-    if num_conflicts == 0 {
-        println!("No conflicts in block\n");
+    if num_conflicts_in_block == 0 {
+        // println!("No conflicts in block\n");
+        println!("{};0;0;0", block_number);
         return 0;
     }
 
+    // println!(
+    //     "number of conflicting tx pairs in block #{}: {} ({}/{}) (#conflicts = {} ({}/{}))\n",
+    //     block_number,
+    //     num_conflicting_pairs,
+    //     num_conflicting_pairs_balance,
+    //     num_conflicting_pairs_storage,
+    //     num_conflicts_in_block,
+    //     num_balance_conflicts_in_block,
+    //     num_storage_conflicts_in_block,
+    // );
+
     println!(
-        "number of conflicting tx pairs in block #{}: {} (#conflicts = {})\n",
-        block_number, num_conflicting_pairs, num_conflicts
+        "{};{};{};{}",
+        block_number,
+        num_conflicting_pairs,
+        num_conflicting_pairs_balance,
+        num_conflicting_pairs_storage
     );
 
     num_conflicting_pairs
