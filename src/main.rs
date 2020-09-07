@@ -96,10 +96,10 @@ fn tx_infos(db: &DB, block: u64) -> Vec<TransactionInfo> {
 fn check_block_conflicts(block_number: u64, tx_infos: Vec<TransactionInfo>, detailed: bool) -> i32 {
     let num_txs = tx_infos.len();
 
-    println!(
-        "Checking conflicts in block #{} ({} txs)...",
-        block_number, num_txs,
-    );
+    // println!(
+    //     "Checking conflicts in block #{} ({} txs)...",
+    //     block_number, num_txs,
+    // );
 
     if num_txs == 0 {
         // println!("Empty block, no conflicts\n");
