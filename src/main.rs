@@ -36,6 +36,8 @@ fn tx_infos_from_db(db: &DB, block: u64) -> Vec<TransactionInfo> {
     let prefix = format!("{:0>8}", block);
     let iter = db.prefix_iterator(prefix.as_bytes());
 
+    iter.status().unwrap();
+
     iter.map(|(key, value)| {
         let key = std::str::from_utf8(&*key).expect("key read is valid string");
         let value = std::str::from_utf8(&*value).expect("value read is valid string");
@@ -187,6 +189,8 @@ fn process_block_aborts(
     txs: Vec<TransactionInfo>,
     mode: OutputMode,
     ignore_balance: bool,
+    abort_counts: &mut HashMap<String, u64>,
+    filter_addr: Option<String>,
 ) {
     let mut balances = HashMap::new();
     let mut storages = HashMap::new();
@@ -206,8 +210,16 @@ fn process_block_aborts(
         for access in reads.into_iter().map(|a| a.target) {
             match access {
                 Target::Balance(addr) => {
+                    // skip if we filter for a different address
+                    if let Some(ref a) = filter_addr {
+                        if &addr != a {
+                            continue;
+                        }
+                    }
+
                     if balances.contains_key(&addr) && !ignore_balance {
                         aborted = true;
+                        *abort_counts.entry(addr.clone()).or_insert(0) += 1;
 
                         if mode == OutputMode::Detailed {
                             println!("    abort on read balance({:?})", addr);
@@ -219,10 +231,18 @@ fn process_block_aborts(
                     }
                 }
                 Target::Storage(addr, entry) => {
+                    // skip if we filter for a different address
+                    if let Some(ref a) = filter_addr {
+                        if &addr != a {
+                            continue;
+                        }
+                    }
+
                     let key = (addr, entry);
 
                     if storages.contains_key(&key) {
                         aborted = true;
+                        *abort_counts.entry(key.0.clone()).or_insert(0) += 1;
 
                         if mode == OutputMode::Detailed {
                             println!("    abort on read storage({:?}, {:?})", key.0, key.1);
@@ -240,8 +260,16 @@ fn process_block_aborts(
         for access in writes.into_iter().map(|a| a.target) {
             match access {
                 Target::Balance(addr) => {
+                    // skip if we filter for a different address
+                    if let Some(ref a) = filter_addr {
+                        if &addr != a {
+                            continue;
+                        }
+                    }
+
                     if balances.contains_key(&addr) && !ignore_balance {
                         aborted = true;
+                        *abort_counts.entry(addr.clone()).or_insert(0) += 1;
 
                         if mode == OutputMode::Detailed {
                             println!("    abort on write balance({:?})", addr);
@@ -253,10 +281,18 @@ fn process_block_aborts(
                     balances.insert(addr, tx_hash.clone());
                 }
                 Target::Storage(addr, entry) => {
+                    // skip if we filter for a different address
+                    if let Some(ref a) = filter_addr {
+                        if &addr != a {
+                            continue;
+                        }
+                    }
+
                     let key = (addr, entry);
 
                     if storages.contains_key(&key) {
                         aborted = true;
+                        *abort_counts.entry(key.0.clone()).or_insert(0) += 1;
 
                         if mode == OutputMode::Detailed {
                             println!("    abort on write storage({:?}, {:?})", key.0, key.1);
@@ -291,6 +327,8 @@ fn process_aborts(db: &DB, blocks: impl Iterator<Item = u64>, mode: OutputMode) 
         println!("block,aborts");
     }
 
+    let mut abort_counts = HashMap::new();
+
     for block in blocks {
         let tx_infos = tx_infos_from_db(&db, block);
 
@@ -302,8 +340,26 @@ fn process_aborts(db: &DB, blocks: impl Iterator<Item = u64>, mode: OutputMode) 
             );
         }
 
-        process_block_aborts(block, tx_infos, mode, /* ignore_balance = */ true);
+        process_block_aborts(
+            block,
+            tx_infos,
+            mode,
+            /* ignore_balance = */ true,
+            &mut abort_counts,
+            /* filter_addr = */ None,
+        );
     }
+
+    // let mut counts = abort_counts.into_iter().collect::<Vec<_>>();
+    // counts.sort_by(|&(_, a), &(_, b)| a.cmp(&b).reverse());
+
+    // for ii in 0..20 {
+    //     if ii >= counts.len() {
+    //         break;
+    //     }
+
+    //     println!("#{}: {} ({} aborts)", ii, counts[ii].0, counts[ii].1);
+    // }
 }
 
 fn main() {
