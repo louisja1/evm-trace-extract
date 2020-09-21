@@ -8,7 +8,7 @@ mod transaction_info;
 
 use rocksdb::{Options, SliceTransform, DB};
 use stats::{BlockStats, TxPairStats};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use transaction_info::{Access, AccessMode, Target, TransactionInfo};
 
@@ -195,128 +195,112 @@ fn process_block_aborts(
     let mut balances = HashMap::new();
     let mut storages = HashMap::new();
 
-    let mut num_aborts = 0;
+    let mut num_aborted_txs_in_block = 0;
 
     for tx in txs {
         let TransactionInfo { tx_hash, accesses } = tx;
 
-        let (reads, writes): (Vec<_>, Vec<_>) = accesses
-            .into_iter()
-            .partition(|a| a.mode == AccessMode::Read);
+        let mut tx_aborted = false;
+        let mut tx_aborted_by = HashSet::new();
 
-        let mut aborted = false;
-
-        // we process reads first so that a tx does not "abort itsself"
-        for access in reads.into_iter().map(|a| a.target) {
-            match access {
+        // go through accesses without enacting the changes,
+        // just checking conflicts
+        for access in &accesses {
+            match &access.target {
                 Target::Balance(addr) => {
+                    // ignore balance conflicts
+                    if ignore_balance {
+                        continue;
+                    }
+
                     // skip if we filter for a different address
                     if let Some(ref a) = filter_addr {
-                        if &addr != a {
+                        if addr != a {
                             continue;
                         }
                     }
 
-                    if balances.contains_key(&addr) && !ignore_balance {
-                        aborted = true;
-                        *abort_counts.entry(addr.clone()).or_insert(0) += 1;
+                    // no conflict
+                    if !balances.contains_key(addr) {
+                        continue;
+                    }
 
-                        if mode == OutputMode::Detailed {
-                            println!("    abort on read balance({:?})", addr);
-                            println!("        1st: {:?}", balances[&addr]);
-                            println!("        2nd: {:?}", tx_hash);
-                        }
+                    tx_aborted = true;
+                    tx_aborted_by.insert(addr.clone());
 
-                        break;
+                    if mode == OutputMode::Detailed {
+                        let mode = match access.mode {
+                            AccessMode::Read => "read",
+                            AccessMode::Write => "write",
+                        };
+
+                        println!("    abort on {} balance({:?})", mode, addr);
+                        println!("        1st: {:?}", balances[addr]);
+                        println!("        2nd: {:?}", tx_hash);
                     }
                 }
                 Target::Storage(addr, entry) => {
                     // skip if we filter for a different address
                     if let Some(ref a) = filter_addr {
-                        if &addr != a {
+                        if addr != a {
                             continue;
                         }
                     }
 
-                    let key = (addr, entry);
+                    let key = (addr.clone(), entry.clone());
 
-                    if storages.contains_key(&key) {
-                        aborted = true;
-                        *abort_counts.entry(key.0.clone()).or_insert(0) += 1;
+                    // no conflict
+                    if !storages.contains_key(&key) {
+                        continue;
+                    }
 
-                        if mode == OutputMode::Detailed {
-                            println!("    abort on read storage({:?}, {:?})", key.0, key.1);
-                            println!("        1st: {:?}", storages[&key]);
-                            println!("        2nd: {:?}", tx_hash);
-                        }
+                    tx_aborted = true;
+                    tx_aborted_by.insert(addr.clone());
 
-                        break;
+                    if mode == OutputMode::Detailed {
+                        let mode = match access.mode {
+                            AccessMode::Read => "read",
+                            AccessMode::Write => "write",
+                        };
+
+                        println!("    abort on {} storage({:?}, {:?})", mode, key.0, key.1);
+                        println!("        1st: {:?}", storages[&key]);
+                        println!("        2nd: {:?}", tx_hash);
                     }
                 }
             }
         }
 
-        // then, we process writes, checking for aborts and enacting updates
-        for access in writes.into_iter().map(|a| a.target) {
-            match access {
+        // enact changes
+        for access in accesses.into_iter().filter(|a| a.mode == AccessMode::Write) {
+            match access.target {
                 Target::Balance(addr) => {
-                    // skip if we filter for a different address
-                    if let Some(ref a) = filter_addr {
-                        if &addr != a {
-                            continue;
-                        }
-                    }
-
-                    if balances.contains_key(&addr) && !ignore_balance {
-                        aborted = true;
-                        *abort_counts.entry(addr.clone()).or_insert(0) += 1;
-
-                        if mode == OutputMode::Detailed {
-                            println!("    abort on write balance({:?})", addr);
-                            println!("        1st: {:?}", balances[&addr]);
-                            println!("        2nd: {:?}", tx_hash);
-                        }
-                    }
-
                     balances.insert(addr, tx_hash.clone());
                 }
                 Target::Storage(addr, entry) => {
-                    // skip if we filter for a different address
-                    if let Some(ref a) = filter_addr {
-                        if &addr != a {
-                            continue;
-                        }
-                    }
-
-                    let key = (addr, entry);
-
-                    if storages.contains_key(&key) {
-                        aborted = true;
-                        *abort_counts.entry(key.0.clone()).or_insert(0) += 1;
-
-                        if mode == OutputMode::Detailed {
-                            println!("    abort on write storage({:?}, {:?})", key.0, key.1);
-                            println!("        1st: {:?}", storages[&key]);
-                            println!("        2nd: {:?}", tx_hash);
-                        }
-                    }
-
-                    storages.insert(key, tx_hash.clone());
+                    storages.insert((addr, entry), tx_hash.clone());
                 }
             }
         }
 
-        if aborted {
-            num_aborts += 1;
+        if tx_aborted {
+            num_aborted_txs_in_block += 1;
+        }
+
+        for addr in tx_aborted_by {
+            *abort_counts.entry(addr).or_insert(0) += 1;
         }
     }
 
     match mode {
         OutputMode::Normal | OutputMode::Detailed => {
-            println!("Num aborts in block #{}: {}\n", block, num_aborts);
+            println!(
+                "Num aborts in block #{}: {}\n",
+                block, num_aborted_txs_in_block
+            );
         }
         OutputMode::Csv => {
-            println!("{},{}", block, num_aborts);
+            println!("{},{}", block, num_aborted_txs_in_block);
         }
     }
 }
