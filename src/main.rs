@@ -299,7 +299,7 @@ async fn occ_detailed_stats(db: &DB, web3: &Web3, from: u64, to: u64, mode: Outp
                 break;
             }
 
-            println!("    #{}: {} ({} aborts, ~{:.2})", ii, counts[ii].0, (counts[ii].1).0, (counts[ii].1).0 / stats["total"].0);
+            println!("    #{}: {} ({} aborts, ~{:.2}%)", ii, counts[ii].0, (counts[ii].1).0, 100.0 * ((counts[ii].1).0 as f64 / stats["total"].0 as f64));
         }
 
         // sort based on weighted aborts
@@ -312,7 +312,7 @@ async fn occ_detailed_stats(db: &DB, web3: &Web3, from: u64, to: u64, mode: Outp
                 break;
             }
 
-            println!("    #{}: {} ({} aborts, ~{:.2})", ii, counts[ii].0, (counts[ii].1).1, (counts[ii].1).1 / stats["total"].1);
+            println!("    #{}: {} ({} gas)", ii, counts[ii].0, (counts[ii].1).1);
         }
     }
 }
