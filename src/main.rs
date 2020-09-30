@@ -222,7 +222,7 @@ async fn process_aborts(db: &DB, web3: &Web3, blocks: impl Iterator<Item = u64>,
 async fn occ_detailed_stats(db: &DB, web3: &Web3, from: u64, to: u64, mode: OutputMode) {
     // print csv header if necessary
     if mode == OutputMode::Csv {
-        println!("block,num_aborted,serial_gas_cost,parallel_gas_cost,batch_2,batch_4,batch_8,batch_16,batch_all,pool_2,pool_4,pool_8,pool_16,pool_all");
+        println!("block,num_txs,num_aborted,serial_gas_cost,parallel_gas_cost,batch_2,batch_4,batch_8,batch_16,batch_all,pool_2,pool_4,pool_8,pool_16,pool_all");
     }
 
     // construct async streams for blocks and tx receipts
@@ -230,32 +230,42 @@ async fn occ_detailed_stats(db: &DB, web3: &Web3, from: u64, to: u64, mode: Outp
     let gases = rpc::gas_parity_parallel(&web3, from..=to);
     let mut both = blocks.zip(gases);
 
+    let mut stats: HashMap<&str, HashMap<String, (u64, U256)>> = Default::default();
+
+    let stat_targets = vec!["batch-2", "batch-4", "batch-8", "batch-16", "batch-all", "pool-2", "pool-4", "pool-8", "pool-16", "pool-all"];
+
+    for target in &stat_targets {
+        stats.insert(target, Default::default());
+    }
+
     // process blocks one by one
     while let Some((block, gas)) = both.next().await {
         let txs = db::tx_infos(&db, block);
         assert_eq!(txs.len(), gas.len());
 
+        let num_txs = txs.len();
         let serial = gas.iter().fold(U256::from(0), |acc, item| acc + item);
         let num_aborted = occ::num_aborts(&txs);
 
         let parallel = occ::parallel_then_serial(&txs, &gas);
 
-        let batch_2 = occ::batches(&txs, &gas, 2);
-        let batch_4 = occ::batches(&txs, &gas, 4);
-        let batch_8 = occ::batches(&txs, &gas, 8);
-        let batch_16 = occ::batches(&txs, &gas, 16);
-        let batch_all = occ::batches(&txs, &gas, txs.len());
+        let batch_2 = occ::batches(&txs, &gas, 2, &mut stats.get_mut("batch-2").unwrap());
+        let batch_4 = occ::batches(&txs, &gas, 4, &mut stats.get_mut("batch-4").unwrap());
+        let batch_8 = occ::batches(&txs, &gas, 8, &mut stats.get_mut("batch-8").unwrap());
+        let batch_16 = occ::batches(&txs, &gas, 16, &mut stats.get_mut("batch-16").unwrap());
+        let batch_all = occ::batches(&txs, &gas, txs.len(), &mut stats.get_mut("batch-all").unwrap());
 
-        let pool_2 = occ::thread_pool(&txs, &gas, 2);
-        let pool_4 = occ::thread_pool(&txs, &gas, 4);
-        let pool_8 = occ::thread_pool(&txs, &gas, 8);
-        let pool_16 = occ::thread_pool(&txs, &gas, 16);
-        let pool_all = occ::thread_pool(&txs, &gas, txs.len());
+        let pool_2 = occ::thread_pool(&txs, &gas, 2, &mut stats.get_mut("pool-2").unwrap());
+        let pool_4 = occ::thread_pool(&txs, &gas, 4, &mut stats.get_mut("pool-4").unwrap());
+        let pool_8 = occ::thread_pool(&txs, &gas, 8, &mut stats.get_mut("pool-8").unwrap());
+        let pool_16 = occ::thread_pool(&txs, &gas, 16, &mut stats.get_mut("pool-16").unwrap());
+        let pool_all = occ::thread_pool(&txs, &gas, txs.len(), &mut stats.get_mut("pool-all").unwrap());
 
         if mode == OutputMode::Csv {
             println!(
-                "{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+                "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
                 block,
+                num_txs,
                 num_aborted,
                 serial,
                 parallel,
@@ -270,6 +280,39 @@ async fn occ_detailed_stats(db: &DB, web3: &Web3, from: u64, to: u64, mode: Outp
                 pool_16,
                 pool_all,
             );
+        }
+    }
+
+    // print overall stats
+    for target in stat_targets {
+        let stats = &stats[target];
+
+        let mut counts = stats.iter().collect::<Vec<_>>();
+
+        // sort based on number of aborts
+        counts.sort_by(|&(_, (n_a, _)), &(_, (n_b, _))| n_a.cmp(&n_b).reverse());
+
+        println!("\n\n{}, number of aborts:", target);
+
+        for ii in 0..11 {
+            if ii >= counts.len() {
+                break;
+            }
+
+            println!("    #{}: {} ({} aborts, ~{:.2})", ii, counts[ii].0, (counts[ii].1).0, (counts[ii].1).0 / stats["total"].0);
+        }
+
+        // sort based on weighted aborts
+        counts.sort_by(|&(_, (_, g_a)), &(_, (_, g_b))| g_a.cmp(&g_b).reverse());
+
+        println!("\n{}, aborted gas:", target);
+
+        for ii in 0..11 {
+            if ii >= counts.len() {
+                break;
+            }
+
+            println!("    #{}: {} ({} aborts, ~{:.2})", ii, counts[ii].0, (counts[ii].1).1, (counts[ii].1).1 / stats["total"].1);
         }
     }
 }
