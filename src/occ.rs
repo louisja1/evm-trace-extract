@@ -84,7 +84,7 @@ pub fn parallel_then_serial(txs: &Vec<TransactionInfo>, gas: &Vec<U256>) -> U256
 // We assume a batch's execution cost is (proportional to) the largest gas cost in that batch.
 // If the n'th transaction in a batch aborts (detected on commit), we will re-execute all transactions after (and including) n.
 // Note that in this scheme, we wait for all txs in a batch before starting the next one, resulting in thread under-utilization.
-pub fn batches(txs: &Vec<TransactionInfo>, gas: &Vec<U256>, batch_size: usize, stats: &mut HashMap<String, (u64, U256)>) -> U256 {
+pub fn batches(txs: &Vec<TransactionInfo>, gas: &Vec<U256>, batch_size: usize, contract_stats: &mut HashMap<String, (u64, U256)>, entry_stats: &mut HashMap<String, (u64, U256)>) -> U256 {
     assert_eq!(txs.len(), gas.len());
 
     let mut next = min(batch_size, txs.len()); // e.g. 4
@@ -122,11 +122,15 @@ pub fn batches(txs: &Vec<TransactionInfo>, gas: &Vec<U256>, batch_size: usize, s
                 if let Target::Storage(addr, entry) = &acc.target {
                     if storages.contains(&(addr, entry)) {
                         // note stats
-                        let (ref mut n, ref mut g) = stats.entry(addr.clone()).or_insert((0, U256::from(0)));
+                        let (ref mut n, ref mut g) = contract_stats.entry(addr.clone()).or_insert((0, U256::from(0)));
                         *n += 1;
                         *g += gas[id];
 
-                        let (ref mut n, ref mut g) = stats.entry("total".to_owned()).or_insert((0, U256::from(0)));
+                        let (ref mut n, ref mut g) = contract_stats.entry("total".to_owned()).or_insert((0, U256::from(0)));
+                        *n += 1;
+                        *g += gas[id];
+
+                        let (ref mut n, ref mut g) = entry_stats.entry(format!("{}-{}", addr, entry)).or_insert((0, U256::from(0)));
                         *n += 1;
                         *g += gas[id];
 
@@ -160,7 +164,7 @@ pub fn batches(txs: &Vec<TransactionInfo>, gas: &Vec<U256>, batch_size: usize, s
     cost
 }
 
-pub fn thread_pool(txs: &Vec<TransactionInfo>, gas: &Vec<U256>, num_threads: usize, stats: &mut HashMap<String, (u64, U256)>) -> U256 {
+pub fn thread_pool(txs: &Vec<TransactionInfo>, gas: &Vec<U256>, num_threads: usize, contract_stats: &mut HashMap<String, (u64, U256)>, entry_stats: &mut HashMap<String, (u64, U256)>) -> U256 {
     assert_eq!(txs.len(), gas.len());
 
     type MinHeap<T> = BinaryHeap<Reverse<T>>;
@@ -269,11 +273,15 @@ pub fn thread_pool(txs: &Vec<TransactionInfo>, gas: &Vec<U256>, num_threads: usi
                             aborted = true;
 
                             // note stats
-                            let (ref mut n, ref mut g) = stats.entry(addr.clone()).or_insert((0, U256::from(0)));
+                            let (ref mut n, ref mut g) = contract_stats.entry(addr.clone()).or_insert((0, U256::from(0)));
                             *n += 1;
                             *g += gas[tx_id];
 
-                            let (ref mut n, ref mut g) = stats.entry("total".to_owned()).or_insert((0, U256::from(0)));
+                            let (ref mut n, ref mut g) = contract_stats.entry("total".to_owned()).or_insert((0, U256::from(0)));
+                            *n += 1;
+                            *g += gas[tx_id];
+
+                            let (ref mut n, ref mut g) = entry_stats.entry(format!("{}-{}", addr, entry)).or_insert((0, U256::from(0)));
                             *n += 1;
                             *g += gas[tx_id];
 

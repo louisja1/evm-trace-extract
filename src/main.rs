@@ -238,6 +238,12 @@ async fn occ_detailed_stats(db: &DB, web3: &Web3, from: u64, to: u64, mode: Outp
         stats.insert(target, Default::default());
     }
 
+    let mut entry_stats: HashMap<&str, HashMap<String, (u64, U256)>> = Default::default();
+
+    for target in &stat_targets {
+        entry_stats.insert(target, Default::default());
+    }
+
     // process blocks one by one
     while let Some((block, gas)) = both.next().await {
         let txs = db::tx_infos(&db, block);
@@ -249,17 +255,17 @@ async fn occ_detailed_stats(db: &DB, web3: &Web3, from: u64, to: u64, mode: Outp
 
         let parallel = occ::parallel_then_serial(&txs, &gas);
 
-        let batch_2 = occ::batches(&txs, &gas, 2, &mut stats.get_mut("batch-2").unwrap());
-        let batch_4 = occ::batches(&txs, &gas, 4, &mut stats.get_mut("batch-4").unwrap());
-        let batch_8 = occ::batches(&txs, &gas, 8, &mut stats.get_mut("batch-8").unwrap());
-        let batch_16 = occ::batches(&txs, &gas, 16, &mut stats.get_mut("batch-16").unwrap());
-        let batch_all = occ::batches(&txs, &gas, txs.len(), &mut stats.get_mut("batch-all").unwrap());
+        let batch_2 = occ::batches(&txs, &gas, 2, &mut stats.get_mut("batch-2").unwrap(), &mut entry_stats.get_mut("batch-2").unwrap());
+        let batch_4 = occ::batches(&txs, &gas, 4, &mut stats.get_mut("batch-4").unwrap(), &mut entry_stats.get_mut("batch-4").unwrap());
+        let batch_8 = occ::batches(&txs, &gas, 8, &mut stats.get_mut("batch-8").unwrap(), &mut entry_stats.get_mut("batch-8").unwrap());
+        let batch_16 = occ::batches(&txs, &gas, 16, &mut stats.get_mut("batch-16").unwrap(), &mut entry_stats.get_mut("batch-16").unwrap());
+        let batch_all = occ::batches(&txs, &gas, txs.len(), &mut stats.get_mut("batch-all").unwrap(), &mut entry_stats.get_mut("batch-all").unwrap());
 
-        let pool_2 = occ::thread_pool(&txs, &gas, 2, &mut stats.get_mut("pool-2").unwrap());
-        let pool_4 = occ::thread_pool(&txs, &gas, 4, &mut stats.get_mut("pool-4").unwrap());
-        let pool_8 = occ::thread_pool(&txs, &gas, 8, &mut stats.get_mut("pool-8").unwrap());
-        let pool_16 = occ::thread_pool(&txs, &gas, 16, &mut stats.get_mut("pool-16").unwrap());
-        let pool_all = occ::thread_pool(&txs, &gas, txs.len(), &mut stats.get_mut("pool-all").unwrap());
+        let pool_2 = occ::thread_pool(&txs, &gas, 2, &mut stats.get_mut("pool-2").unwrap(), &mut entry_stats.get_mut("pool-2").unwrap());
+        let pool_4 = occ::thread_pool(&txs, &gas, 4, &mut stats.get_mut("pool-4").unwrap(), &mut entry_stats.get_mut("pool-4").unwrap());
+        let pool_8 = occ::thread_pool(&txs, &gas, 8, &mut stats.get_mut("pool-8").unwrap(), &mut entry_stats.get_mut("pool-8").unwrap());
+        let pool_16 = occ::thread_pool(&txs, &gas, 16, &mut stats.get_mut("pool-16").unwrap(), &mut entry_stats.get_mut("pool-16").unwrap());
+        let pool_all = occ::thread_pool(&txs, &gas, txs.len(), &mut stats.get_mut("pool-all").unwrap(), &mut entry_stats.get_mut("pool-all").unwrap());
 
         if mode == OutputMode::Csv {
             println!(
@@ -284,7 +290,9 @@ async fn occ_detailed_stats(db: &DB, web3: &Web3, from: u64, to: u64, mode: Outp
     }
 
     // print overall stats
-    for target in stat_targets {
+    println!("----------------- CONTRACT STATS -----------------");
+
+    for target in &stat_targets {
         let stats = &stats[target];
 
         let mut counts = stats.iter().collect::<Vec<_>>();
@@ -294,7 +302,7 @@ async fn occ_detailed_stats(db: &DB, web3: &Web3, from: u64, to: u64, mode: Outp
 
         println!("\n\n{}, number of aborts:", target);
 
-        for ii in 0..11 {
+        for ii in 0..21 {
             if ii >= counts.len() {
                 break;
             }
@@ -307,7 +315,43 @@ async fn occ_detailed_stats(db: &DB, web3: &Web3, from: u64, to: u64, mode: Outp
 
         println!("\n{}, aborted gas:", target);
 
-        for ii in 0..11 {
+        for ii in 0..21 {
+            if ii >= counts.len() {
+                break;
+            }
+
+            println!("    #{}: {} ({} gas)", ii, counts[ii].0, (counts[ii].1).1);
+        }
+    }
+
+
+    // print entry stats
+    println!("----------------- ENTRY STATS -----------------");
+
+    for target in &stat_targets {
+        let stats = &entry_stats[target];
+
+        let mut counts = stats.iter().collect::<Vec<_>>();
+
+        // sort based on number of aborts
+        counts.sort_by(|&(_, (n_a, _)), &(_, (n_b, _))| n_a.cmp(&n_b).reverse());
+
+        println!("\n\n{}, number of aborts:", target);
+
+        for ii in 0..101 {
+            if ii >= counts.len() {
+                break;
+            }
+
+            println!("    #{}: {} ({} aborts)", ii, counts[ii].0, (counts[ii].1).0);
+        }
+
+        // sort based on weighted aborts
+        counts.sort_by(|&(_, (_, g_a)), &(_, (_, g_b))| g_a.cmp(&g_b).reverse());
+
+        println!("\n{}, aborted gas:", target);
+
+        for ii in 0..101 {
             if ii >= counts.len() {
                 break;
             }
