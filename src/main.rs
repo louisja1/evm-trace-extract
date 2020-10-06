@@ -12,7 +12,7 @@ mod rpc;
 mod stats;
 mod transaction_info;
 
-use futures::{stream, StreamExt};
+use futures::{future, stream, FutureExt, StreamExt};
 use output_mode::OutputMode;
 use rocksdb::DB;
 use std::collections::{HashMap, HashSet};
@@ -222,53 +222,87 @@ async fn process_aborts(db: &DB, web3: &Web3, blocks: impl Iterator<Item = u64>,
 async fn occ_detailed_stats(db: &DB, web3: &Web3, from: u64, to: u64, mode: OutputMode) {
     // print csv header if necessary
     if mode == OutputMode::Csv {
-        println!("block,num_aborted,serial_gas_cost,parallel_gas_cost,batch_2,batch_4,batch_8,batch_16,batch_all,pool_2,pool_4,pool_8,pool_16,pool_all");
+        println!("block,num_txs,num_aborted,serial_gas_cost,pool_t_2_q_0,pool_t_4_q_0,pool_t_8_q_0,pool_t_16_q_0,pool_t_all_q_0,pool_t_2_q_2,pool_t_4_q_2,pool_t_8_q_2,pool_t_16_q_2,pool_t_all_q_2,");
     }
 
-    // construct async streams for blocks and tx receipts
-    let blocks = stream::iter(from..=to);
-    let gases = rpc::gas_parity_parallel(&web3, from..=to);
-    let mut both = blocks.zip(gases);
+    // stream RPC results
+    let others = stream::iter(from..=to)
+        .map(|b| {
+            let web3_clone = web3.clone();
 
-    // process blocks one by one
-    while let Some((block, gas)) = both.next().await {
+            let a = tokio::spawn(async move {
+                rpc::gas_parity(&web3_clone, b)
+                    .await
+                    .expect("parity_getBlockReceipts RPC should succeed")
+            });
+
+            let web3_clone = web3.clone();
+
+            let b = tokio::spawn(async move {
+                rpc::tx_infos(&web3_clone, b)
+                    .await
+                    .expect("eth_getBlock RPC should succeed")
+                    .expect("block should exist")
+            });
+
+            future::join(a, b).map(|(a, b)| (a.expect("future OK"), b.expect("future OK")))
+        })
+        .buffered(10);
+
+    let blocks = stream::iter(from..=to);
+    let mut it = blocks.zip(others);
+
+    // simulate OCC for each block
+    while let Some((block, (gas, info))) = it.next().await {
         let txs = db::tx_infos(&db, block);
+
         assert_eq!(txs.len(), gas.len());
+        assert_eq!(txs.len(), info.len());
 
         let serial = gas.iter().fold(U256::from(0), |acc, item| acc + item);
+        let num_txs = txs.len();
         let num_aborted = occ::num_aborts(&txs);
 
-        let parallel = occ::parallel_then_serial(&txs, &gas);
+        let simulate = |num_threads, max_queued_per_thread, min_gas_for_queue| {
+            occ::thread_pool(
+                &txs,
+                &gas,
+                &info,
+                num_threads,
+                max_queued_per_thread,
+                min_gas_for_queue,
+            )
+        };
 
-        let batch_2 = occ::batches(&txs, &gas, 2);
-        let batch_4 = occ::batches(&txs, &gas, 4);
-        let batch_8 = occ::batches(&txs, &gas, 8);
-        let batch_16 = occ::batches(&txs, &gas, 16);
-        let batch_all = occ::batches(&txs, &gas, txs.len());
+        let pool_t_2_q_0 = simulate(2, 0, std::u64::MAX.into());
+        let pool_t_4_q_0 = simulate(4, 0, std::u64::MAX.into());
+        let pool_t_8_q_0 = simulate(8, 0, std::u64::MAX.into());
+        let pool_t_16_q_0 = simulate(16, 0, std::u64::MAX.into());
+        let pool_t_all_q_0 = simulate(txs.len(), 0, std::u64::MAX.into());
 
-        let pool_2 = occ::thread_pool(&txs, &gas, 2);
-        let pool_4 = occ::thread_pool(&txs, &gas, 4);
-        let pool_8 = occ::thread_pool(&txs, &gas, 8);
-        let pool_16 = occ::thread_pool(&txs, &gas, 16);
-        let pool_all = occ::thread_pool(&txs, &gas, txs.len());
+        let pool_t_2_q_2 = simulate(2, 2, 100_000.into());
+        let pool_t_4_q_2 = simulate(4, 2, 100_000.into());
+        let pool_t_8_q_2 = simulate(8, 2, 100_000.into());
+        let pool_t_16_q_2 = simulate(16, 2, 100_000.into());
+        let pool_t_all_q_2 = simulate(txs.len(), 2, 100_000.into());
 
         if mode == OutputMode::Csv {
             println!(
                 "{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
                 block,
+                num_txs,
                 num_aborted,
                 serial,
-                parallel,
-                batch_2,
-                batch_4,
-                batch_8,
-                batch_16,
-                batch_all,
-                pool_2,
-                pool_4,
-                pool_8,
-                pool_16,
-                pool_all,
+                pool_t_2_q_0,
+                pool_t_4_q_0,
+                pool_t_8_q_0,
+                pool_t_16_q_0,
+                pool_t_all_q_0,
+                pool_t_2_q_2,
+                pool_t_4_q_2,
+                pool_t_8_q_2,
+                pool_t_16_q_2,
+                pool_t_all_q_2,
             );
         }
     }

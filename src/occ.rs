@@ -2,7 +2,7 @@ use crate::transaction_info::{Access, AccessMode, Target, TransactionInfo};
 use std::cmp::{min, Reverse};
 use std::collections::{BinaryHeap, HashSet};
 use std::convert::TryFrom;
-use web3::types::U256;
+use web3::types::{H160, U256};
 
 // Estimate number of aborts (due to conflicts) in block.
 // The actual number can be lower if we process transactions in batches,
@@ -44,6 +44,7 @@ pub fn num_aborts(txs: &Vec<TransactionInfo>) -> u64 {
 // First execute all transaction in parallel (infinite threads), then re-execute aborted ones serially.
 // Note that this is inaccuare in practice: if tx-1 and tx-3 succeed and tx-2 aborts, we will have to
 // re-execute both tx-2 and tx-3, as tx-2's new storage access patterns might make tx-3 abort this time.
+#[allow(dead_code)]
 pub fn parallel_then_serial(txs: &Vec<TransactionInfo>, gas: &Vec<U256>) -> U256 {
     assert_eq!(txs.len(), gas.len());
 
@@ -84,6 +85,7 @@ pub fn parallel_then_serial(txs: &Vec<TransactionInfo>, gas: &Vec<U256>) -> U256
 // We assume a batch's execution cost is (proportional to) the largest gas cost in that batch.
 // If the n'th transaction in a batch aborts (detected on commit), we will re-execute all transactions after (and including) n.
 // Note that in this scheme, we wait for all txs in a batch before starting the next one, resulting in thread under-utilization.
+#[allow(dead_code)]
 pub fn batches(txs: &Vec<TransactionInfo>, gas: &Vec<U256>, batch_size: usize) -> U256 {
     assert_eq!(txs.len(), gas.len());
 
@@ -152,7 +154,14 @@ pub fn batches(txs: &Vec<TransactionInfo>, gas: &Vec<U256>, batch_size: usize) -
     cost
 }
 
-pub fn thread_pool(txs: &Vec<TransactionInfo>, gas: &Vec<U256>, num_threads: usize) -> U256 {
+pub fn thread_pool(
+    txs: &Vec<TransactionInfo>,
+    gas: &Vec<U256>,
+    info: &Vec<(Option<H160>, U256)>,
+    num_threads: usize,
+    max_queued_per_thread: usize,
+    min_gas_for_queue: U256, // 100000
+) -> U256 {
     assert_eq!(txs.len(), gas.len());
 
     type MinHeap<T> = BinaryHeap<Reverse<T>>;
@@ -161,6 +170,11 @@ pub fn thread_pool(txs: &Vec<TransactionInfo>, gas: &Vec<U256>, num_threads: usi
     // item: <transaction-id>
     // pop() always returns the lowest transaction-id
     let mut tx_queue: MinHeap<usize> = (0..txs.len()).map(Reverse).collect();
+
+    // per thread transaction queue: transactions schedule for specific threads waiting to be executed
+    // item in each queue: <transaction-id>
+    // pop() always returns the lowest transaction-id
+    let mut per_thread_tx_queue: Vec<MinHeap<usize>> = vec![Default::default(); num_threads];
 
     // commit queue: txs that finished execution and are waiting to commit
     // item: <transaction-id, storage-version>
@@ -177,6 +191,8 @@ pub fn thread_pool(txs: &Vec<TransactionInfo>, gas: &Vec<U256>, num_threads: usi
 
     // overall cost of execution
     let mut cost = U256::from(0);
+
+    // let mut num_iteration = 0;
 
     loop {
         // exit condition: we have committed all transactions
@@ -203,15 +219,56 @@ pub fn thread_pool(txs: &Vec<TransactionInfo>, gas: &Vec<U256>, num_threads: usi
             .collect::<Vec<_>>();
 
         for thread_id in idle_threads {
-            if tx_queue.is_empty() {
-                break;
+            // try to schedule from its own queue first
+            if let Some(Reverse(tx_id)) = per_thread_tx_queue[thread_id].pop() {
+                let gas_left = gas[tx_id];
+                let sv = next_to_commit as i32 - 1;
+                threads[thread_id] = Some((tx_id, gas_left, sv));
+                continue;
             }
 
-            let Reverse(tx_id) = tx_queue.pop().expect("not empty");
-            let gas_left = gas[tx_id];
-            let sv = next_to_commit as i32 - 1;
+            'assign_to_thread: loop {
+                // otherwise, get tx from tx_queue
+                let tx_id = match tx_queue.pop() {
+                    Some(Reverse(id)) => id,
+                    None => break,
+                };
 
-            threads[thread_id] = Some((tx_id, gas_left, sv));
+                let receiver = info[tx_id].0;
+                let gas_limit = info[tx_id].1;
+
+                // cheap transactions are scheduled directly on the current thread
+                if gas_limit < min_gas_for_queue {
+                    let gas_left = gas[tx_id];
+                    let sv = next_to_commit as i32 - 1;
+                    threads[thread_id] = Some((tx_id, gas_left, sv));
+                    break;
+                }
+
+                // check if there's any potentially conflicting tx running
+                let conflicting_threads = threads
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, opt)| opt.is_some())
+                    .map(|(thread_id, opt)| (thread_id, opt.unwrap()))
+                    .filter(|(_, (tx_id, _, _))| info[*tx_id].0 == receiver)
+                    .map(|(thread_id, _)| thread_id);
+
+                // and add this tx to the corresponding thread's queue
+                for other_thread in conflicting_threads {
+                    if per_thread_tx_queue[other_thread].len() < max_queued_per_thread {
+                        per_thread_tx_queue[other_thread].push(Reverse(tx_id));
+                        continue 'assign_to_thread;
+                    }
+                }
+
+                // if there are no conflicting transactions running or all threads'
+                // queues are full, we schedule the current transaction directly
+                let gas_left = gas[tx_id];
+                let sv = next_to_commit as i32 - 1;
+                threads[thread_id] = Some((tx_id, gas_left, sv));
+                break;
+            }
         }
 
         // find transaction that finishes execution next
@@ -278,6 +335,3 @@ pub fn thread_pool(txs: &Vec<TransactionInfo>, gas: &Vec<U256>, num_threads: usi
 
     cost
 }
-
-// TODO: utilize CPUs
-// TODO: re-use previous results, don't re-execute unnecesarily
