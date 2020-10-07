@@ -1,5 +1,7 @@
+use crate::rpc;
 use crate::transaction_info::{parse_accesses, parse_tx_hash, TransactionInfo};
 use rocksdb::{Options, SliceTransform, DB};
+use std::collections::HashMap;
 
 pub fn open(path: &str) -> DB {
     let prefix_extractor = SliceTransform::create_fixed_prefix(8);
@@ -11,7 +13,8 @@ pub fn open(path: &str) -> DB {
     DB::open(&opts, path).expect("can open db")
 }
 
-pub fn tx_infos(db: &DB, block: u64) -> Vec<TransactionInfo> {
+// note: this will get tx infos in the wrong order!
+pub fn tx_infos_deprecated(db: &DB, block: u64) -> Vec<TransactionInfo> {
     let prefix = format!("{:0>8}", block);
     let iter = db.prefix_iterator(prefix.as_bytes());
 
@@ -27,4 +30,42 @@ pub fn tx_infos(db: &DB, block: u64) -> Vec<TransactionInfo> {
         }
     })
     .collect()
+}
+
+pub fn tx_infos(db: &DB, block: u64, infos: &Vec<rpc::TxInfo>) -> Vec<TransactionInfo> {
+    let prefix = format!("{:0>8}", block);
+    let iter = db.prefix_iterator(prefix.as_bytes());
+
+    iter.status().unwrap();
+
+    // get results from db
+    let mut txs_unordered: HashMap<String, TransactionInfo> = iter
+        .map(|(key, value)| {
+            let key = std::str::from_utf8(&*key).expect("key read is valid string");
+            let value = std::str::from_utf8(&*value).expect("value read is valid string");
+
+            let tx_hash = parse_tx_hash(key).to_owned();
+
+            let tx = TransactionInfo {
+                tx_hash: tx_hash.clone(),
+                accesses: parse_accesses(value).to_owned(),
+            };
+
+            (tx_hash, tx)
+        })
+        .collect();
+
+    // order results based on `infos`
+    assert_eq!(infos.len(), txs_unordered.len());
+    let mut res = vec![];
+
+    for hash in infos.iter().map(|i| i.hash) {
+        let tx = txs_unordered
+            .remove(&format!("{:?}", hash))
+            .expect("hash should exist");
+
+        res.push(tx);
+    }
+
+    res
 }
