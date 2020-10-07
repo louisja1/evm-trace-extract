@@ -165,6 +165,12 @@ pub fn thread_pool(
 ) -> U256 {
     assert_eq!(txs.len(), gas.len());
 
+    #[allow(unused_mut)]
+    let mut ignored_slots: HashSet<&str> = Default::default();
+    // ignored_slots.insert("0x06012c8cf97bead5deae237070f9587f8e7a266d-0x000000000000000000000000000000000000000000000000000000000000000f");
+    // ignored_slots.insert("0x06012c8cf97bead5deae237070f9587f8e7a266d-0x0000000000000000000000000000000000000000000000000000000000000006");
+    // ignored_slots.insert("0x06012c8cf97bead5deae237070f9587f8e7a266d-0xc56c286245a85e4048e082d091c57ede29ec05df707b458fe836e199193ff182");
+
     type MinHeap<T> = BinaryHeap<Reverse<T>>;
 
     // transaction queue: transactions waiting to be executed
@@ -321,8 +327,10 @@ pub fn thread_pool(
                 for acc in accesses.iter().filter(|a| a.mode == AccessMode::Read) {
                     if let Target::Storage(addr, entry) = &acc.target {
                         if concurrent.contains(&Access::storage_write(addr, entry)) {
-                            aborted = true;
-                            break 'outer;
+                            if !ignored_slots.contains(&format!("{}-{}", addr, entry)[..]) {
+                                aborted = true;
+                                break 'outer;
+                            }
                         }
                     }
                 }
