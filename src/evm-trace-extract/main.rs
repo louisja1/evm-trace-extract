@@ -1,16 +1,13 @@
-#[macro_use]
-extern crate lazy_static;
 extern crate regex;
 extern crate rocksdb;
 extern crate web3;
 
-mod db;
+use common::*;
+
 mod occ;
 mod output_mode;
 mod pairwise;
-mod rpc;
 mod stats;
-mod transaction_info;
 
 use futures::{stream, StreamExt};
 use output_mode::OutputMode;
@@ -30,7 +27,7 @@ fn process_pairwise(db: &DB, blocks: impl Iterator<Item = u64>, mode: OutputMode
 
     // process blocks
     for block in blocks {
-        let tx_infos = db::tx_infos(&db, block);
+        let tx_infos = db::tx_infos_deprecated(&db, block);
 
         if matches!(mode, OutputMode::Normal | OutputMode::Detailed) {
             println!(
@@ -149,7 +146,7 @@ async fn process_block_aborts(
             num_aborted_txs_in_block += 1;
 
             // TODO: get gas for the whole block?
-            let gas = rpc::gas(web3, &tx_hash[..])
+            let gas = rpc::gas_used(web3, &tx_hash[..])
                 .await
                 .expect(&format!("Unable to retrieve gas (1) {}", tx_hash)[..])
                 .expect(&format!("Unable to retrieve gas (2) {}", tx_hash)[..]);
@@ -185,7 +182,7 @@ async fn process_aborts(db: &DB, web3: &Web3, blocks: impl Iterator<Item = u64>,
     let mut abort_stats = HashMap::new();
 
     for block in blocks {
-        let tx_infos = db::tx_infos(&db, block);
+        let tx_infos = db::tx_infos_deprecated(&db, block);
 
         if matches!(mode, OutputMode::Normal | OutputMode::Detailed) {
             println!(
@@ -219,20 +216,70 @@ async fn process_aborts(db: &DB, web3: &Web3, blocks: impl Iterator<Item = u64>,
     // }
 }
 
-async fn occ_detailed_stats(db: &DB, web3: &Web3, from: u64, to: u64, mode: OutputMode) {
+async fn occ_detailed_stats(db: &DB, _web3: &Web3, from: u64, to: u64, mode: OutputMode) {
     // print csv header if necessary
     if mode == OutputMode::Csv {
-        println!("block,num_txs,num_aborted,serial_gas_cost,parallel_gas_cost,batch_2,batch_4,batch_8,batch_16,batch_all,pool_2,pool_4,pool_8,pool_16,pool_all");
+        println!("block,num_txs,num_aborted,serial_gas_cost,pool_t_2_q_0,pool_t_4_q_0,pool_t_8_q_0,pool_t_16_q_0,pool_t_all_q_0,pool_t_2_q_2,pool_t_4_q_2,pool_t_8_q_2,pool_t_16_q_2,pool_t_all_q_2,");
     }
 
-    // construct async streams for blocks and tx receipts
-    let blocks = stream::iter(from..=to);
-    let gases = rpc::gas_parity_parallel(&web3, from..=to);
-    let mut both = blocks.zip(gases);
+    // stream RPC results
+    // let others = stream::iter(from..=to)
+    //     .map(|b| {
+    //         let web3_clone = web3.clone();
 
+    //         let a = tokio::spawn(async move {
+    //             rpc::gas_parity(&web3_clone, b)
+    //                 .await
+    //                 .expect("parity_getBlockReceipts RPC should succeed")
+    //         });
+
+    //         let web3_clone = web3.clone();
+
+    //         let b = tokio::spawn(async move {
+    //             rpc::tx_infos(&web3_clone, b)
+    //                 .await
+    //                 .expect("eth_getBlock RPC should succeed")
+    //                 .expect("block should exist")
+    //         });
+
+    //         future::join(a, b).map(|(a, b)| (a.expect("future OK"), b.expect("future OK")))
+    //     })
+    //     .buffered(10);
+
+    let rpc_db = db::RpcDb::open("./_rpc_db").expect("db open succeeds");
+
+    let others = stream::iter(from..=to).map(|block| {
+        let gas = rpc_db
+            .gas_used(block)
+            .expect("get from db succeeds")
+            .expect("block exists in db");
+
+        let info = rpc_db
+            .tx_infos(block)
+            .expect("get from db succeeds")
+            .expect("block exists in db");
+
+        (gas, info)
+    });
+
+    let blocks = stream::iter(from..=to);
+    let mut it = blocks.zip(others);
+
+    // -------------------------------
     let mut stats: HashMap<&str, HashMap<String, (u64, U256)>> = Default::default();
 
-    let stat_targets = vec!["batch-2", "batch-4", "batch-8", "batch-16", "batch-all", "pool-2", "pool-4", "pool-8", "pool-16", "pool-all"];
+    let stat_targets = vec![
+        "pool_t_2_q_0",
+        "pool_t_4_q_0",
+        "pool_t_8_q_0",
+        "pool_t_16_q_0",
+        "pool_t_all_q_0",
+        "pool_t_2_q_2",
+        "pool_t_4_q_2",
+        "pool_t_8_q_2",
+        "pool_t_16_q_2",
+        "pool_t_all_q_2",
+    ];
 
     for target in &stat_targets {
         stats.insert(target, Default::default());
@@ -243,48 +290,61 @@ async fn occ_detailed_stats(db: &DB, web3: &Web3, from: u64, to: u64, mode: Outp
     for target in &stat_targets {
         entry_stats.insert(target, Default::default());
     }
+    // -------------------------------
 
-    // process blocks one by one
-    while let Some((block, gas)) = both.next().await {
-        let txs = db::tx_infos(&db, block);
+    // simulate OCC for each block
+    while let Some((block, (gas, info))) = it.next().await {
+        let txs = db::tx_infos(&db, block, &info);
+
         assert_eq!(txs.len(), gas.len());
+        assert_eq!(txs.len(), info.len());
 
         let num_txs = txs.len();
         let serial = gas.iter().fold(U256::from(0), |acc, item| acc + item);
         let num_aborted = occ::num_aborts(&txs);
 
-        let parallel = occ::parallel_then_serial(&txs, &gas);
+        let mut simulate = |num_threads, max_queued_per_thread, min_gas_for_queue, stat_name| {
+            occ::thread_pool(
+                &txs,
+                &gas,
+                &info,
+                num_threads,
+                max_queued_per_thread,
+                min_gas_for_queue,
+                &mut stats.get_mut(stat_name).unwrap(),
+                &mut entry_stats.get_mut(stat_name).unwrap(),
+            )
+        };
 
-        let batch_2 = occ::batches(&txs, &gas, 2, &mut stats.get_mut("batch-2").unwrap(), &mut entry_stats.get_mut("batch-2").unwrap());
-        let batch_4 = occ::batches(&txs, &gas, 4, &mut stats.get_mut("batch-4").unwrap(), &mut entry_stats.get_mut("batch-4").unwrap());
-        let batch_8 = occ::batches(&txs, &gas, 8, &mut stats.get_mut("batch-8").unwrap(), &mut entry_stats.get_mut("batch-8").unwrap());
-        let batch_16 = occ::batches(&txs, &gas, 16, &mut stats.get_mut("batch-16").unwrap(), &mut entry_stats.get_mut("batch-16").unwrap());
-        let batch_all = occ::batches(&txs, &gas, txs.len(), &mut stats.get_mut("batch-all").unwrap(), &mut entry_stats.get_mut("batch-all").unwrap());
+        let pool_t_2_q_0 = simulate(2, 0, std::u64::MAX.into(), "pool_t_2_q_0");
+        let pool_t_4_q_0 = simulate(4, 0, std::u64::MAX.into(), "pool_t_4_q_0");
+        let pool_t_8_q_0 = simulate(8, 0, std::u64::MAX.into(), "pool_t_8_q_0");
+        let pool_t_16_q_0 = simulate(16, 0, std::u64::MAX.into(), "pool_t_16_q_0");
+        let pool_t_all_q_0 = simulate(txs.len(), 0, std::u64::MAX.into(), "pool_t_all_q_0");
 
-        let pool_2 = occ::thread_pool(&txs, &gas, 2, &mut stats.get_mut("pool-2").unwrap(), &mut entry_stats.get_mut("pool-2").unwrap());
-        let pool_4 = occ::thread_pool(&txs, &gas, 4, &mut stats.get_mut("pool-4").unwrap(), &mut entry_stats.get_mut("pool-4").unwrap());
-        let pool_8 = occ::thread_pool(&txs, &gas, 8, &mut stats.get_mut("pool-8").unwrap(), &mut entry_stats.get_mut("pool-8").unwrap());
-        let pool_16 = occ::thread_pool(&txs, &gas, 16, &mut stats.get_mut("pool-16").unwrap(), &mut entry_stats.get_mut("pool-16").unwrap());
-        let pool_all = occ::thread_pool(&txs, &gas, txs.len(), &mut stats.get_mut("pool-all").unwrap(), &mut entry_stats.get_mut("pool-all").unwrap());
+        let pool_t_2_q_2 = simulate(2, 2, 100_000.into(), "pool_t_2_q_2");
+        let pool_t_4_q_2 = simulate(4, 2, 100_000.into(), "pool_t_4_q_2");
+        let pool_t_8_q_2 = simulate(8, 2, 100_000.into(), "pool_t_8_q_2");
+        let pool_t_16_q_2 = simulate(16, 2, 100_000.into(), "pool_t_16_q_2");
+        let pool_t_all_q_2 = simulate(txs.len(), 2, 100_000.into(), "pool_t_all_q_2");
 
         if mode == OutputMode::Csv {
             println!(
-                "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+                "{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
                 block,
                 num_txs,
                 num_aborted,
                 serial,
-                parallel,
-                batch_2,
-                batch_4,
-                batch_8,
-                batch_16,
-                batch_all,
-                pool_2,
-                pool_4,
-                pool_8,
-                pool_16,
-                pool_all,
+                pool_t_2_q_0,
+                pool_t_4_q_0,
+                pool_t_8_q_0,
+                pool_t_16_q_0,
+                pool_t_all_q_0,
+                pool_t_2_q_2,
+                pool_t_4_q_2,
+                pool_t_8_q_2,
+                pool_t_16_q_2,
+                pool_t_all_q_2,
             );
         }
     }
@@ -307,7 +367,13 @@ async fn occ_detailed_stats(db: &DB, web3: &Web3, from: u64, to: u64, mode: Outp
                 break;
             }
 
-            println!("    #{}: {} ({} aborts, ~{:.2}%)", ii, counts[ii].0, (counts[ii].1).0, 100.0 * ((counts[ii].1).0 as f64 / stats["total"].0 as f64));
+            println!(
+                "    #{}: {} ({} aborts, ~{:.2}%)",
+                ii,
+                counts[ii].0,
+                (counts[ii].1).0,
+                100.0 * ((counts[ii].1).0 as f64 / stats["total"].0 as f64)
+            );
         }
 
         // sort based on weighted aborts
@@ -323,7 +389,6 @@ async fn occ_detailed_stats(db: &DB, web3: &Web3, from: u64, to: u64, mode: Outp
             println!("    #{}: {} ({} gas)", ii, counts[ii].0, (counts[ii].1).1);
         }
     }
-
 
     // print entry stats
     println!("----------------- ENTRY STATS -----------------");
@@ -343,7 +408,12 @@ async fn occ_detailed_stats(db: &DB, web3: &Web3, from: u64, to: u64, mode: Outp
                 break;
             }
 
-            println!("    #{}: {} ({} aborts)", ii, counts[ii].0, (counts[ii].1).0);
+            println!(
+                "    #{}: {} ({} aborts)",
+                ii,
+                counts[ii].0,
+                (counts[ii].1).0
+            );
         }
 
         // sort based on weighted aborts
@@ -385,7 +455,7 @@ async fn main() -> web3::Result<()> {
     let output = OutputMode::from_str(&args[5][..]);
 
     // open db
-    let db = db::open(path);
+    let db = db::open_traces(path);
 
     // check range
     let latest_raw = db
