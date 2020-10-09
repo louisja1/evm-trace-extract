@@ -1,18 +1,15 @@
-#[macro_use]
-extern crate lazy_static;
 extern crate regex;
 extern crate rocksdb;
 extern crate web3;
 
-mod db;
+use common::*;
+
 mod occ;
 mod output_mode;
 mod pairwise;
-mod rpc;
 mod stats;
-mod transaction_info;
 
-use futures::{future, stream, FutureExt, StreamExt};
+use futures::{stream, StreamExt};
 use output_mode::OutputMode;
 use rocksdb::DB;
 use std::collections::{HashMap, HashSet};
@@ -149,7 +146,7 @@ async fn process_block_aborts(
             num_aborted_txs_in_block += 1;
 
             // TODO: get gas for the whole block?
-            let gas = rpc::gas(web3, &tx_hash[..])
+            let gas = rpc::gas_used(web3, &tx_hash[..])
                 .await
                 .expect(&format!("Unable to retrieve gas (1) {}", tx_hash)[..])
                 .expect(&format!("Unable to retrieve gas (2) {}", tx_hash)[..]);
@@ -219,35 +216,51 @@ async fn process_aborts(db: &DB, web3: &Web3, blocks: impl Iterator<Item = u64>,
     // }
 }
 
-async fn occ_detailed_stats(db: &DB, web3: &Web3, from: u64, to: u64, mode: OutputMode) {
+async fn occ_detailed_stats(db: &DB, _web3: &Web3, from: u64, to: u64, mode: OutputMode) {
     // print csv header if necessary
     if mode == OutputMode::Csv {
         println!("block,num_txs,num_aborted,serial_gas_cost,pool_t_2_q_0,pool_t_4_q_0,pool_t_8_q_0,pool_t_16_q_0,pool_t_all_q_0,pool_t_2_q_2,pool_t_4_q_2,pool_t_8_q_2,pool_t_16_q_2,pool_t_all_q_2,");
     }
 
     // stream RPC results
-    let others = stream::iter(from..=to)
-        .map(|b| {
-            let web3_clone = web3.clone();
+    // let others = stream::iter(from..=to)
+    //     .map(|b| {
+    //         let web3_clone = web3.clone();
 
-            let a = tokio::spawn(async move {
-                rpc::gas_parity(&web3_clone, b)
-                    .await
-                    .expect("parity_getBlockReceipts RPC should succeed")
-            });
+    //         let a = tokio::spawn(async move {
+    //             rpc::gas_parity(&web3_clone, b)
+    //                 .await
+    //                 .expect("parity_getBlockReceipts RPC should succeed")
+    //         });
 
-            let web3_clone = web3.clone();
+    //         let web3_clone = web3.clone();
 
-            let b = tokio::spawn(async move {
-                rpc::tx_infos(&web3_clone, b)
-                    .await
-                    .expect("eth_getBlock RPC should succeed")
-                    .expect("block should exist")
-            });
+    //         let b = tokio::spawn(async move {
+    //             rpc::tx_infos(&web3_clone, b)
+    //                 .await
+    //                 .expect("eth_getBlock RPC should succeed")
+    //                 .expect("block should exist")
+    //         });
 
-            future::join(a, b).map(|(a, b)| (a.expect("future OK"), b.expect("future OK")))
-        })
-        .buffered(10);
+    //         future::join(a, b).map(|(a, b)| (a.expect("future OK"), b.expect("future OK")))
+    //     })
+    //     .buffered(10);
+
+    let rpc_db = db::RpcDb::open("./_rpc_db").expect("db open succeeds");
+
+    let others = stream::iter(from..=to).map(|block| {
+        let gas = rpc_db
+            .gas_used(block)
+            .expect("get from db succeeds")
+            .expect("block exists in db");
+
+        let info = rpc_db
+            .tx_infos(block)
+            .expect("get from db succeeds")
+            .expect("block exists in db");
+
+        (gas, info)
+    });
 
     let blocks = stream::iter(from..=to);
     let mut it = blocks.zip(others);
@@ -332,7 +345,7 @@ async fn main() -> web3::Result<()> {
     let output = OutputMode::from_str(&args[5][..]);
 
     // open db
-    let db = db::open(path);
+    let db = db::open_traces(path);
 
     // check range
     let latest_raw = db
