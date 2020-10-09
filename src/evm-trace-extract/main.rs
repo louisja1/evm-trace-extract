@@ -219,7 +219,7 @@ async fn process_aborts(db: &DB, web3: &Web3, blocks: impl Iterator<Item = u64>,
 async fn occ_detailed_stats(db: &DB, _web3: &Web3, from: u64, to: u64, mode: OutputMode) {
     // print csv header if necessary
     if mode == OutputMode::Csv {
-        println!("block,num_txs,num_aborted,serial_gas_cost,pool_t_2_q_0,pool_t_4_q_0,pool_t_8_q_0,pool_t_16_q_0,pool_t_all_q_0,pool_t_2_q_2,pool_t_4_q_2,pool_t_8_q_2,pool_t_16_q_2,pool_t_all_q_2,");
+        // println!("block,num_txs,num_aborted,serial_gas_cost,pool_t_2_q_0,pool_t_4_q_0,pool_t_8_q_0,pool_t_16_q_0,pool_t_all_q_0,pool_t_2_q_2,pool_t_4_q_2,pool_t_8_q_2,pool_t_16_q_2,pool_t_all_q_2,");
     }
 
     // stream RPC results
@@ -299,9 +299,9 @@ async fn occ_detailed_stats(db: &DB, _web3: &Web3, from: u64, to: u64, mode: Out
         assert_eq!(txs.len(), gas.len());
         assert_eq!(txs.len(), info.len());
 
-        let num_txs = txs.len();
-        let serial = gas.iter().fold(U256::from(0), |acc, item| acc + item);
-        let num_aborted = occ::num_aborts(&txs);
+        let _num_txs = txs.len();
+        let _serial = gas.iter().fold(U256::from(0), |acc, item| acc + item);
+        let _num_aborted = occ::num_aborts(&txs);
 
         let mut simulate = |num_threads, max_queued_per_thread, min_gas_for_queue, stat_name| {
             occ::thread_pool(
@@ -316,117 +316,69 @@ async fn occ_detailed_stats(db: &DB, _web3: &Web3, from: u64, to: u64, mode: Out
             )
         };
 
-        let pool_t_2_q_0 = simulate(2, 0, std::u64::MAX.into(), "pool_t_2_q_0");
-        let pool_t_4_q_0 = simulate(4, 0, std::u64::MAX.into(), "pool_t_4_q_0");
-        let pool_t_8_q_0 = simulate(8, 0, std::u64::MAX.into(), "pool_t_8_q_0");
-        let pool_t_16_q_0 = simulate(16, 0, std::u64::MAX.into(), "pool_t_16_q_0");
-        let pool_t_all_q_0 = simulate(txs.len(), 0, std::u64::MAX.into(), "pool_t_all_q_0");
+        let _pool_t_2_q_0 = simulate(2, 0, std::u64::MAX.into(), "pool_t_2_q_0");
+        let _pool_t_4_q_0 = simulate(4, 0, std::u64::MAX.into(), "pool_t_4_q_0");
+        let _pool_t_8_q_0 = simulate(8, 0, std::u64::MAX.into(), "pool_t_8_q_0");
+        let _pool_t_16_q_0 = simulate(16, 0, std::u64::MAX.into(), "pool_t_16_q_0");
+        let _pool_t_all_q_0 = simulate(txs.len(), 0, std::u64::MAX.into(), "pool_t_all_q_0");
 
-        let pool_t_2_q_2 = simulate(2, 2, 100_000.into(), "pool_t_2_q_2");
-        let pool_t_4_q_2 = simulate(4, 2, 100_000.into(), "pool_t_4_q_2");
-        let pool_t_8_q_2 = simulate(8, 2, 100_000.into(), "pool_t_8_q_2");
-        let pool_t_16_q_2 = simulate(16, 2, 100_000.into(), "pool_t_16_q_2");
-        let pool_t_all_q_2 = simulate(txs.len(), 2, 100_000.into(), "pool_t_all_q_2");
+        let _pool_t_2_q_2 = simulate(2, 2, 100_000.into(), "pool_t_2_q_2");
+        let _pool_t_4_q_2 = simulate(4, 2, 100_000.into(), "pool_t_4_q_2");
+        let _pool_t_8_q_2 = simulate(8, 2, 100_000.into(), "pool_t_8_q_2");
+        let _pool_t_16_q_2 = simulate(16, 2, 100_000.into(), "pool_t_16_q_2");
+        let _pool_t_all_q_2 = simulate(txs.len(), 2, 100_000.into(), "pool_t_all_q_2");
 
-        if mode == OutputMode::Csv {
-            println!(
-                "{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
-                block,
-                num_txs,
-                num_aborted,
-                serial,
-                pool_t_2_q_0,
-                pool_t_4_q_0,
-                pool_t_8_q_0,
-                pool_t_16_q_0,
-                pool_t_all_q_0,
-                pool_t_2_q_2,
-                pool_t_4_q_2,
-                pool_t_8_q_2,
-                pool_t_16_q_2,
-                pool_t_all_q_2,
-            );
-        }
+        // if mode == OutputMode::Csv {
+        //     println!(
+        //         "{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+        //         block,
+        //         num_txs,
+        //         num_aborted,
+        //         serial,
+        //         pool_t_2_q_0,
+        //         pool_t_4_q_0,
+        //         pool_t_8_q_0,
+        //         pool_t_16_q_0,
+        //         pool_t_all_q_0,
+        //         pool_t_2_q_2,
+        //         pool_t_4_q_2,
+        //         pool_t_8_q_2,
+        //         pool_t_16_q_2,
+        //         pool_t_all_q_2,
+        //     );
+        // }
     }
 
     // print overall stats
-    println!("----------------- CONTRACT STATS -----------------");
+    println!("target,type,address,entry,aborts,gas");
+
+    const MIN_ABORTS: u64 = 10;
 
     for target in &stat_targets {
-        let stats = &stats[target];
-
-        let mut counts = stats.iter().collect::<Vec<_>>();
-
-        // sort based on number of aborts
-        counts.sort_by(|&(_, (n_a, _)), &(_, (n_b, _))| n_a.cmp(&n_b).reverse());
-
-        println!("\n\n{}, number of aborts:", target);
-
-        for ii in 0..21 {
-            if ii >= counts.len() {
-                break;
+        for (addr, (aborts, gas)) in &stats[target] {
+            if *aborts < MIN_ABORTS {
+                continue;
             }
 
             println!(
-                "    #{}: {} ({} aborts, ~{:.2}%)",
-                ii,
-                counts[ii].0,
-                (counts[ii].1).0,
-                100.0 * ((counts[ii].1).0 as f64 / stats["total"].0 as f64)
+                "{},{},{},{},{},{}",
+                target, "contract", addr, "", aborts, gas
             );
         }
 
-        // sort based on weighted aborts
-        counts.sort_by(|&(_, (_, g_a)), &(_, (_, g_b))| g_a.cmp(&g_b).reverse());
-
-        println!("\n{}, aborted gas:", target);
-
-        for ii in 0..21 {
-            if ii >= counts.len() {
-                break;
+        for (addr_entry, (aborts, gas)) in &entry_stats[target] {
+            if *aborts < MIN_ABORTS {
+                continue;
             }
 
-            println!("    #{}: {} ({} gas)", ii, counts[ii].0, (counts[ii].1).1);
-        }
-    }
-
-    // print entry stats
-    println!("----------------- ENTRY STATS -----------------");
-
-    for target in &stat_targets {
-        let stats = &entry_stats[target];
-
-        let mut counts = stats.iter().collect::<Vec<_>>();
-
-        // sort based on number of aborts
-        counts.sort_by(|&(_, (n_a, _)), &(_, (n_b, _))| n_a.cmp(&n_b).reverse());
-
-        println!("\n\n{}, number of aborts:", target);
-
-        for ii in 0..101 {
-            if ii >= counts.len() {
-                break;
-            }
+            let parts: Vec<&str> = addr_entry.split("-").collect();
+            let addr = parts[0];
+            let entry = parts[1];
 
             println!(
-                "    #{}: {} ({} aborts)",
-                ii,
-                counts[ii].0,
-                (counts[ii].1).0
+                "{},{},{},{},{},{}",
+                target, "entry", addr, entry, aborts, gas
             );
-        }
-
-        // sort based on weighted aborts
-        counts.sort_by(|&(_, (_, g_a)), &(_, (_, g_b))| g_a.cmp(&g_b).reverse());
-
-        println!("\n{}, aborted gas:", target);
-
-        for ii in 0..101 {
-            if ii >= counts.len() {
-                break;
-            }
-
-            println!("    #{}: {} ({} gas)", ii, counts[ii].0, (counts[ii].1).1);
         }
     }
 }
