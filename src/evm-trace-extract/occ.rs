@@ -242,19 +242,31 @@ pub fn thread_pool(
                 };
 
                 // cheap transactions are scheduled directly on the current thread
-                if info[tx_id].gas_limit < min_gas_for_queue {
-                    let gas_left = gas[tx_id];
-                    let sv = next_to_commit as i32 - 1;
-                    threads[thread_id] = Some((tx_id, gas_left, sv));
-                    break;
-                }
+                // if info[tx_id].gas_limit < min_gas_for_queue {
+                //     let gas_left = gas[tx_id];
+                //     let sv = next_to_commit as i32 - 1;
+                //     threads[thread_id] = Some((tx_id, gas_left, sv));
+                //     break;
+                // }
 
                 // check if there's any potentially conflicting tx running
-                let receiver_matches =
-                    |info0: &rpc::TxInfo, info1: &rpc::TxInfo| match (info0.to, info1.to) {
-                        (Some(to0), Some(to1)) => to0 == to1,
-                        _ => false,
-                    };
+                // let receiver_matches =
+                //     |info0: &rpc::TxInfo, info1: &rpc::TxInfo| match (info0.to, info1.to) {
+                //         (Some(to0), Some(to1)) => to0 == to1,
+                //         _ => false,
+                //     };
+
+                let txs_conflict = |to_schedule: &TransactionInfo, running: &TransactionInfo| {
+                    for acc in to_schedule.accesses.iter().filter(|a| a.mode == AccessMode::Read) {
+                        if let Target::Storage(addr, entry) = &acc.target {
+                            if running.accesses.contains(&Access::storage_write(addr, entry)) {
+                                return true;
+                            }
+                        }
+                    }
+
+                    false
+                };
 
                 let conflicting_threads = threads
                     .iter()
@@ -262,7 +274,8 @@ pub fn thread_pool(
                     .filter(|(_, opt)| opt.is_some())
                     .map(|(thread_id, opt)| (thread_id, opt.unwrap()))
                     .filter(|(_, (other_tx, _, _))| {
-                        receiver_matches(&info[tx_id], &info[*other_tx])
+                        // receiver_matches(&info[tx_id], &info[*other_tx])
+                        txs_conflict(&txs[tx_id], &txs[*other_tx])
                     })
                     .map(|(thread_id, _)| thread_id);
 
