@@ -287,16 +287,34 @@ async fn occ_detailed_stats(db: &DB, _web3: &Web3, from: u64, to: u64, mode: Out
             )
         };
 
+        println!("starting pool_t_2_q_0");
         let pool_t_2_q_0 = simulate(2, 0, std::u64::MAX.into());
+
+        println!("starting pool_t_4_q_0");
         let pool_t_4_q_0 = simulate(4, 0, std::u64::MAX.into());
+
+        println!("starting pool_t_8_q_0");
         let pool_t_8_q_0 = simulate(8, 0, std::u64::MAX.into());
+
+        println!("starting pool_t_16_q_0");
         let pool_t_16_q_0 = simulate(16, 0, std::u64::MAX.into());
+
+        println!("starting pool_t_all_q_0");
         let pool_t_all_q_0 = simulate(txs.len(), 0, std::u64::MAX.into());
 
+        println!("starting pool_t_2_q_2");
         let pool_t_2_q_2 = simulate(2, 2, 100_000.into());
+
+        println!("starting pool_t_4_q_2");
         let pool_t_4_q_2 = simulate(4, 2, 100_000.into());
+
+        println!("starting pool_t_8_q_2");
         let pool_t_8_q_2 = simulate(8, 2, 100_000.into());
+
+        println!("starting pool_t_16_q_2");
         let pool_t_16_q_2 = simulate(16, 2, 100_000.into());
+
+        println!("starting pool_t_all_q_2");
         let pool_t_all_q_2 = simulate(txs.len(), 2, 100_000.into());
 
         if mode == OutputMode::Csv {

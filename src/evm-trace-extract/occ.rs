@@ -199,14 +199,19 @@ pub fn thread_pool(
     // overall cost of execution
     let mut cost = U256::from(0);
 
-    // let mut num_iteration = 0;
+    let mut num_iteration = 0;
 
     loop {
+        println!("[{}] global queue before scheduling: {:?}", num_iteration, tx_queue);
+        println!("[{}] local queue before scheduling: {:?}", num_iteration, per_thread_tx_queue);
+
         // exit condition: we have committed all transactions
         if next_to_commit == txs.len() {
             // nothing left to execute or commit
             assert!(tx_queue.is_empty(), "tx queue not empty");
             assert!(commit_queue.is_empty(), "commit queue not empty");
+
+            // TODO: check local queues
 
             // all threads are idle
             assert!(
@@ -223,7 +228,9 @@ pub fn thread_pool(
             .enumerate()
             .filter(|(_, opt)| opt.is_none())
             .map(|(id, _)| id)
-            .collect::<Vec<_>>();
+            .collect::<Vec<_>>(); // TODO
+
+        println!("[{}] idle threads: {:?}", num_iteration, idle_threads);
 
         for thread_id in idle_threads {
             // try to schedule from its own queue first
@@ -231,6 +238,7 @@ pub fn thread_pool(
                 let gas_left = gas[tx_id];
                 let sv = next_to_commit as i32 - 1;
                 threads[thread_id] = Some((tx_id, gas_left, sv));
+                println!("[{}] scheduling tx {} from local queue on thread {}", num_iteration, tx_id, thread_id);
                 continue;
             }
 
@@ -260,6 +268,7 @@ pub fn thread_pool(
                     for acc in to_schedule.accesses.iter().filter(|a| a.mode == AccessMode::Read) {
                         if let Target::Storage(addr, entry) = &acc.target {
                             if running.accesses.contains(&Access::storage_write(addr, entry)) {
+                                println!("[{}] txs {} and {} conflict on access to storage entry {}-{}", num_iteration, running.tx_hash, to_schedule.tx_hash, addr, entry);
                                 return true;
                             }
                         }
@@ -275,15 +284,23 @@ pub fn thread_pool(
                     .map(|(thread_id, opt)| (thread_id, opt.unwrap()))
                     .filter(|(_, (other_tx, _, _))| {
                         // receiver_matches(&info[tx_id], &info[*other_tx])
-                        txs_conflict(&txs[tx_id], &txs[*other_tx])
+                        if txs_conflict(&txs[tx_id], &txs[*other_tx]) {
+                            println!("[{}] -> txs {} and {} conflict", num_iteration, other_tx, tx_id);
+                            return true;
+                        } else {
+                            return false;
+                        }
                     })
                     .map(|(thread_id, _)| thread_id);
 
                 // and add this tx to the corresponding thread's queue
                 for other_thread in conflicting_threads {
                     if per_thread_tx_queue[other_thread].len() < max_queued_per_thread {
+                        println!("[{}] -> adding tx {} to local queue of thread {}", num_iteration, tx_id, other_thread);
                         per_thread_tx_queue[other_thread].push(Reverse(tx_id));
                         continue 'assign_to_thread;
+                    } else {
+                        println!("[{}] -> NOT adding tx {} to local queue of thread {}: queue is full", num_iteration, tx_id, other_thread);
                     }
                 }
 
@@ -292,9 +309,15 @@ pub fn thread_pool(
                 let gas_left = gas[tx_id];
                 let sv = next_to_commit as i32 - 1;
                 threads[thread_id] = Some((tx_id, gas_left, sv));
+                println!("[{}] scheduling tx {} from global queue on thread {}", num_iteration, tx_id, thread_id);
                 break;
             }
         }
+
+        println!("[{}] global queue after scheduling: {:?}", num_iteration, tx_queue);
+        println!("[{}] local queue after scheduling: {:?}", num_iteration, per_thread_tx_queue);
+
+        println!("[{}] threads before execution: {:?}", num_iteration, threads);
 
         // find transaction that finishes execution next
         let (thread_id, (tx_id, gas_step, sv)) = threads
@@ -304,6 +327,8 @@ pub fn thread_pool(
             .map(|(id, opt)| (id, opt.unwrap()))
             .min_by_key(|(_, (_, gas_left, _))| *gas_left)
             .expect("not all threads are idle");
+
+        println!("[{}] finished execution of tx {} on thread {} (gas step = {}, sv = {})", num_iteration, tx_id, thread_id, gas_step, sv);
 
         // finish executing tx, update thread states
         threads[thread_id] = None;
@@ -316,10 +341,17 @@ pub fn thread_pool(
             }
         }
 
+        println!("[{}] threads after execution: {:?}", num_iteration, threads);
+
+        println!("[{}] commit queue before commits: {:?}", num_iteration, commit_queue);
+
         // process commits/aborts
-        while let Some(Reverse((tx_id, _))) = commit_queue.peek() {
+        while let Some(Reverse((tx_id, sv))) = commit_queue.peek() {
+            println!("[{}] checking tx {} for commit with sv = {}", num_iteration, tx_id, sv);
+
             // we must commit transactions in order
             if *tx_id != next_to_commit {
+                println!("[{}] unable to commit tx {}, next to commit is {}", num_iteration, tx_id, next_to_commit);
                 assert!(*tx_id > next_to_commit);
                 break;
             }
@@ -341,6 +373,9 @@ pub fn thread_pool(
                     if let Target::Storage(addr, entry) = &acc.target {
                         if concurrent.contains(&Access::storage_write(addr, entry)) {
                             if !ignored_slots.contains(&format!("{}-{}", addr, entry)[..]) {
+
+                                println!("[{}] tx {} ABORT: conflict with {} on storage access to {}-{}", num_iteration, tx_id, prev_tx, addr, entry);
+
                                 aborted = true;
                                 break 'outer;
                             }
@@ -351,6 +386,7 @@ pub fn thread_pool(
 
             // commit transaction
             if !aborted {
+                println!("[{}] tx {} COMMIT ", num_iteration, tx_id);
                 next_to_commit += 1;
                 continue;
             }
@@ -358,6 +394,10 @@ pub fn thread_pool(
             // re-schedule aborted tx
             tx_queue.push(Reverse(tx_id));
         }
+
+        println!("[{}] commit queue after commits: {:?}", num_iteration, commit_queue);
+        println!("[{}] gas cost: {}\n", num_iteration, cost);
+        num_iteration += 1;
     }
 
     cost
