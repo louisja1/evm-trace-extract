@@ -11,7 +11,7 @@ use web3::types::U256;
 // The actual number can also be higher because the same transaction could be aborted multiple times,
 //      e.g. with batch [tx-1, tx-2, tx-3], tx-2's abort will make tx-3 abort as well,
 //      then in the next batch [tx-2, tx-3, tx-4] tx-3 might be aborted again if it reads a slot written by tx-2.
-pub fn num_aborts(txs: &Vec<TransactionInfo>) -> u64 {
+pub fn num_conflicts(txs: &Vec<TransactionInfo>) -> u64 {
     let mut num_aborted = 0;
 
     // keep track of which storage entries were written
@@ -167,7 +167,6 @@ pub fn thread_pool(
 ) -> U256 {
     assert_eq!(txs.len(), gas.len());
 
-    #[allow(unused_mut)]
     let mut ignored_slots: HashSet<&str> = Default::default();
     ignored_slots.insert("0x06012c8cf97bead5deae237070f9587f8e7a266d-0x000000000000000000000000000000000000000000000000000000000000000f");
     ignored_slots.insert("0x06012c8cf97bead5deae237070f9587f8e7a266d-0x0000000000000000000000000000000000000000000000000000000000000006");
@@ -196,6 +195,7 @@ pub fn thread_pool(
     // overall cost of execution
     let mut cost = U256::from(0);
 
+    #[allow(non_snake_case)]
     let mut N = 0;
 
     let is_wr_conflict = |running: usize, to_schedule: usize| {
@@ -270,8 +270,8 @@ pub fn thread_pool(
                 &txs[tx_id].tx_hash[0..8]
             );
 
-            // check executed txs for conflicts
             if allow_avoid_conflicts_during_scheduling {
+                // check executed txs for conflicts
                 for Reverse((executed_tx, _, _)) in &commit_queue {
                     // case 1:
                     // e.g., tx-3 is waiting to be committed, we're scheduling tx-5
@@ -287,9 +287,7 @@ pub fn thread_pool(
                     //       tx-5 reads from tx-3 => tx-5 should be invalidated
                     // TODO
                 }
-            }
 
-            if allow_avoid_conflicts_during_scheduling {
                 // check running txs for conflicts
                 for thread_id in 0..threads.len() {
                     let (running_tx, ..) = match &threads[thread_id] {
