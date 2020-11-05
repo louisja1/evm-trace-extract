@@ -411,35 +411,21 @@ pub fn thread_pool(
             next_to_commit
         );
 
-        while let Some(Reverse((tx_id, sv, _))) = commit_queue.peek() {
+        let mut new_commit_queue: MinHeap<(usize, i32, Vec<usize>)> = Default::default();
+
+        while let Some(Reverse((tx_id, sv, seen))) = commit_queue.pop() {
             log::trace!(
-                "[{}] attempting to commit tx-{} ({}, sv = {})...",
+                "[{}] checking executed tx-{} ({}, sv = {})...",
                 N,
                 tx_id,
-                &txs[*tx_id].tx_hash[0..8],
+                &txs[tx_id].tx_hash[0..8],
                 sv
             );
-
-            // we must commit transactions in order
-            if *tx_id != next_to_commit {
-                log::trace!(
-                    "[{}] unable to commit tx-{} ({}): next to commit is tx-{} ({})",
-                    N,
-                    tx_id,
-                    &txs[*tx_id].tx_hash[0..8],
-                    next_to_commit,
-                    &txs[next_to_commit].tx_hash[0..8]
-                );
-                assert!(*tx_id > next_to_commit);
-                break;
-            }
-
-            let Reverse((tx_id, sv, seen)) = commit_queue.pop().unwrap();
 
             // check all potentially conflicting transactions
             // e.g. if tx-3 was executed with sv = -1, it means that it cannot see writes by tx-0, tx-1, tx-2
             let conflict_from = usize::try_from(sv + 1).expect("sv + 1 should be non-negative");
-            let conflict_to = tx_id;
+            let conflict_to = next_to_commit;
 
             let accesses = &txs[tx_id].accesses;
             let mut aborted = false;
@@ -469,21 +455,40 @@ pub fn thread_pool(
                 }
             }
 
-            // commit transaction
-            if !aborted {
-                log::trace!(
-                    "[{}] COMMIT tx-{} ({})",
-                    N,
-                    tx_id,
-                    &txs[tx_id].tx_hash[0..8]
-                );
-                next_to_commit += 1;
+            // abort transaction
+            if aborted {
+                // re-schedule aborted tx
+                tx_queue.push(Reverse(tx_id));
                 continue;
             }
 
-            // re-schedule aborted tx
-            tx_queue.push(Reverse(tx_id));
+            // we still need to wait for previous txs to commit
+            if tx_id != next_to_commit {
+                log::trace!(
+                    "[{}] unable to commit tx-{} ({}): next to commit is tx-{} ({})",
+                    N,
+                    tx_id,
+                    &txs[tx_id].tx_hash[0..8],
+                    next_to_commit,
+                    &txs[next_to_commit].tx_hash[0..8]
+                );
+                assert!(tx_id > next_to_commit);
+                new_commit_queue.push(Reverse((tx_id, sv, seen)));
+                continue;
+            }
+
+            // commit transaction
+            log::trace!(
+                "[{}] COMMIT tx-{} ({})",
+                N,
+                tx_id,
+                &txs[tx_id].tx_hash[0..8]
+            );
+            next_to_commit += 1;
         }
+
+        // reinsert uncommitted txs
+        commit_queue = new_commit_queue;
 
         N += 1;
         log::trace!("[{}] cost so far: {}", N, cost);
