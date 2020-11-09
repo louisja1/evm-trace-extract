@@ -1,3 +1,6 @@
+#[macro_use]
+extern crate lazy_static;
+
 use common::*;
 
 mod depgraph;
@@ -13,7 +16,7 @@ trait BlockDataStream: stream::Stream<Item = (u64, (Vec<U256>, Vec<rpc::TxInfo>)
 impl<T> BlockDataStream for T where T: stream::Stream<Item = (u64, (Vec<U256>, Vec<rpc::TxInfo>))> {}
 
 async fn occ_detailed_stats(trace_db: &DB, mut stream: impl BlockDataStream + Unpin) {
-    println!("block,num_txs,num_conflicts,serial_gas_cost,pool_t_2,pool_t_4,pool_t_8,pool_t_16,pool_t_all,optimal_t_2,optimal_t_4,optimal_t_8,optimal_t_16,optimal_t_all");
+    println!("block,num_txs,num_conflicts,serial_gas_cost,pool_t_2,pool_t_4,pool_t_8,pool_t_16,pool_t_all,optimal_t_2,optimal_t_4,optimal_t_8,optimal_t_16,optimal_t_all,optimal_t_2_ignore,optimal_t_4_ignore,optimal_t_8_ignore,optimal_t_16_ignore,optimal_t_all_ignore");
 
     while let Some((block, (gas, info))) = stream.next().await {
         let txs = db::tx_infos(&trace_db, block, &info);
@@ -43,14 +46,20 @@ async fn occ_detailed_stats(trace_db: &DB, mut stream: impl BlockDataStream + Un
         let pool_t_16_q_0 = occ(16);
         let pool_t_all_q_0 = occ(txs.len());
 
-        let optimal_t_2 = depgraph::cost(&txs, &gas, 2);
-        let optimal_t_4 = depgraph::cost(&txs, &gas, 4);
-        let optimal_t_8 = depgraph::cost(&txs, &gas, 8);
-        let optimal_t_16 = depgraph::cost(&txs, &gas, 16);
-        let optimal_t_all = depgraph::cost(&txs, &gas, txs.len());
+        let optimal_t_2 = depgraph::cost(&txs, &gas, 2, false);
+        let optimal_t_4 = depgraph::cost(&txs, &gas, 4, false);
+        let optimal_t_8 = depgraph::cost(&txs, &gas, 8, false);
+        let optimal_t_16 = depgraph::cost(&txs, &gas, 16, false);
+        let optimal_t_all = depgraph::cost(&txs, &gas, txs.len(), false);
+
+        let optimal_t_2_ignore = depgraph::cost(&txs, &gas, 2, true);
+        let optimal_t_4_ignore = depgraph::cost(&txs, &gas, 4, true);
+        let optimal_t_8_ignore = depgraph::cost(&txs, &gas, 8, true);
+        let optimal_t_16_ignore = depgraph::cost(&txs, &gas, 16, true);
+        let optimal_t_all_ignore = depgraph::cost(&txs, &gas, txs.len(), true);
 
         println!(
-            "{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
             block,
             num_txs,
             num_conflicts,
@@ -65,6 +74,11 @@ async fn occ_detailed_stats(trace_db: &DB, mut stream: impl BlockDataStream + Un
             optimal_t_8,
             optimal_t_16,
             optimal_t_all,
+            optimal_t_2_ignore,
+            optimal_t_4_ignore,
+            optimal_t_8_ignore,
+            optimal_t_16_ignore,
+            optimal_t_all_ignore,
         );
     }
 }
