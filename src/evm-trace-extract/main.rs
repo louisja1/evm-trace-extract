@@ -12,11 +12,24 @@ use web3::types::U256;
 trait BlockDataStream: stream::Stream<Item = (u64, (Vec<U256>, Vec<rpc::TxInfo>))> {}
 impl<T> BlockDataStream for T where T: stream::Stream<Item = (u64, (Vec<U256>, Vec<rpc::TxInfo>))> {}
 
-async fn occ_detailed_stats(trace_db: &DB, mut stream: impl BlockDataStream + Unpin) {
+async fn occ_detailed_stats(trace_db: &DB, stream: impl BlockDataStream + Unpin) {
     println!("block,num_txs,num_conflicts,serial_gas_cost,pool_t_2,pool_t_4,pool_t_8,pool_t_16,pool_t_all,optimal_t_2,optimal_t_4,optimal_t_8,optimal_t_16,optimal_t_all");
 
-    while let Some((block, (gas, info))) = stream.next().await {
-        let txs = db::tx_infos(&trace_db, block, &info);
+    let chunk_size = 3;
+    let mut stream = stream.chunks(chunk_size);
+
+    while let Some(chunk) = stream.next().await {
+        let mut blocks = vec![];
+        let mut txs = vec![];
+        let mut gas = vec![];
+        let mut info = vec![];
+
+        for (block, (chunk_gas, chunk_info)) in chunk {
+            blocks.push(block);
+            txs.extend(db::tx_infos(&trace_db, block, &chunk_info).into_iter());
+            gas.extend(chunk_gas.into_iter());
+            info.extend(chunk_info.into_iter());
+        }
 
         assert_eq!(txs.len(), gas.len());
         assert_eq!(txs.len(), info.len());
@@ -48,6 +61,12 @@ async fn occ_detailed_stats(trace_db: &DB, mut stream: impl BlockDataStream + Un
         let optimal_t_8 = depgraph::cost(&txs, &gas, 8);
         let optimal_t_16 = depgraph::cost(&txs, &gas, 16);
         let optimal_t_all = depgraph::cost(&txs, &gas, txs.len());
+
+        let block = blocks
+            .into_iter()
+            .map(|b| b.to_string())
+            .collect::<Vec<String>>()
+            .join("-");
 
         println!(
             "{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
