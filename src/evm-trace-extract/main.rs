@@ -13,7 +13,7 @@ trait BlockDataStream: stream::Stream<Item = (u64, (Vec<U256>, Vec<rpc::TxInfo>)
 impl<T> BlockDataStream for T where T: stream::Stream<Item = (u64, (Vec<U256>, Vec<rpc::TxInfo>))> {}
 
 async fn occ_detailed_stats(trace_db: &DB, stream: impl BlockDataStream + Unpin) {
-    println!("block,num_txs,num_conflicts,serial_gas_cost,pool_t_2,pool_t_4,pool_t_8,pool_t_16,pool_t_all,optimal_t_2,optimal_t_4,optimal_t_8,optimal_t_16,optimal_t_all");
+    println!("block,num_txs,num_conflicts,serial_gas_cost,pool_t_2,pool_t_4,pool_t_8,pool_t_16,pool_t_32,optimal_t_2,optimal_t_4,optimal_t_8,optimal_t_16,optimal_t_32");
 
     let chunk_size = 3;
     let mut stream = stream.chunks(chunk_size);
@@ -54,7 +54,7 @@ async fn occ_detailed_stats(trace_db: &DB, stream: impl BlockDataStream + Unpin)
         let pool_t_4_q_0 = occ(4);
         let pool_t_8_q_0 = occ(8);
         let pool_t_16_q_0 = occ(16);
-        let pool_t_all_q_0 = occ(txs.len());
+        let pool_t_32_q_0 = occ(32);
 
         let graph = depgraph::DependencyGraph::from(&txs);
 
@@ -62,7 +62,7 @@ async fn occ_detailed_stats(trace_db: &DB, stream: impl BlockDataStream + Unpin)
         let optimal_t_4 = graph.cost(&gas, 4);
         let optimal_t_8 = graph.cost(&gas, 8);
         let optimal_t_16 = graph.cost(&gas, 16);
-        let optimal_t_all = graph.cost(&gas, txs.len());
+        let optimal_t_32 = graph.cost(&gas, 32);
 
         let block = blocks
             .into_iter()
@@ -80,12 +80,12 @@ async fn occ_detailed_stats(trace_db: &DB, stream: impl BlockDataStream + Unpin)
             pool_t_4_q_0,
             pool_t_8_q_0,
             pool_t_16_q_0,
-            pool_t_all_q_0,
+            pool_t_32_q_0,
             optimal_t_2,
             optimal_t_4,
             optimal_t_8,
             optimal_t_16,
-            optimal_t_all,
+            optimal_t_32,
         );
     }
 }
