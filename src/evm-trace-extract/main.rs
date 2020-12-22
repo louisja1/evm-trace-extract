@@ -13,7 +13,7 @@ trait BlockDataStream: stream::Stream<Item = (u64, (Vec<U256>, Vec<rpc::TxInfo>)
 impl<T> BlockDataStream for T where T: stream::Stream<Item = (u64, (Vec<U256>, Vec<rpc::TxInfo>))> {}
 
 async fn occ_detailed_stats(trace_db: &DB, stream: impl BlockDataStream + Unpin) {
-    println!("block,num_txs,num_conflicts,serial_gas_cost,pool_t_2,pool_t_4,pool_t_8,pool_t_16,pool_t_32,pool_t_2_ignore_slots,pool_t_4_ignore_slots,pool_t_8_ignore_slots,pool_t_16_ignore_slots,pool_t_32_ignore_slots,pool_t_2_avoid_conflicts,pool_t_4_avoid_conflicts,pool_t_8_avoid_conflicts,pool_t_16_avoid_conflicts,pool_t_32_avoid_conflicts,pool_t_2_read_uncommitted,pool_t_4_read_uncommitted,pool_t_8_read_uncommitted,pool_t_16_read_uncommitted,pool_t_32_read_uncommitted,optimal_t_2,optimal_t_4,optimal_t_8,optimal_t_16,optimal_t_32,longest_path,longest_path_cost");
+    println!("block,num_txs,num_conflicts,serial_gas_cost,pool_t_2,pool_t_4,pool_t_8,pool_t_16,pool_t_32,pool_t_2_ignore_slots,pool_t_4_ignore_slots,pool_t_8_ignore_slots,pool_t_16_ignore_slots,pool_t_32_ignore_slots,pool_t_2_read_uncommitted,pool_t_4_read_uncommitted,pool_t_8_read_uncommitted,pool_t_16_read_uncommitted,pool_t_32_read_uncommitted,optimal_t_2,optimal_t_4,optimal_t_8,optimal_t_16,optimal_t_32,longest_path,longest_path_cost");
 
     let chunk_size = 3;
     let mut stream = stream.chunks(chunk_size);
@@ -74,23 +74,23 @@ async fn occ_detailed_stats(trace_db: &DB, stream: impl BlockDataStream + Unpin)
         let pool_t_16_q_0_ignore_slots = occ(16);
         let pool_t_32_q_0_ignore_slots = occ(32);
 
-        let occ = |num_threads| {
-            occ::thread_pool(
-                &txs,
-                &gas,
-                &info,
-                num_threads,
-                false, // allow_ignore_slots
-                true,  // allow_avoid_conflicts_during_scheduling
-                false, // allow_read_from_uncommitted
-            )
-        };
+        // let occ = |num_threads| {
+        //     occ::thread_pool(
+        //         &txs,
+        //         &gas,
+        //         &info,
+        //         num_threads,
+        //         false, // allow_ignore_slots
+        //         true,  // allow_avoid_conflicts_during_scheduling
+        //         false, // allow_read_from_uncommitted
+        //     )
+        // };
 
-        let pool_t_2_q_0_avoid_conflicts = occ(2);
-        let pool_t_4_q_0_avoid_conflicts = occ(4);
-        let pool_t_8_q_0_avoid_conflicts = occ(8);
-        let pool_t_16_q_0_avoid_conflicts = occ(16);
-        let pool_t_32_q_0_avoid_conflicts = occ(32);
+        // let pool_t_2_q_0_avoid_conflicts = occ(2);
+        // let pool_t_4_q_0_avoid_conflicts = occ(4);
+        // let pool_t_8_q_0_avoid_conflicts = occ(8);
+        // let pool_t_16_q_0_avoid_conflicts = occ(16);
+        // let pool_t_32_q_0_avoid_conflicts = occ(32);
 
         let occ = |num_threads| {
             occ::thread_pool(
@@ -133,7 +133,7 @@ async fn occ_detailed_stats(trace_db: &DB, stream: impl BlockDataStream + Unpin)
             .join("-");
 
         println!(
-            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
             block,
             num_txs,
             num_conflicts,
@@ -148,11 +148,11 @@ async fn occ_detailed_stats(trace_db: &DB, stream: impl BlockDataStream + Unpin)
             pool_t_8_q_0_ignore_slots,
             pool_t_16_q_0_ignore_slots,
             pool_t_32_q_0_ignore_slots,
-            pool_t_2_q_0_avoid_conflicts,
-            pool_t_4_q_0_avoid_conflicts,
-            pool_t_8_q_0_avoid_conflicts,
-            pool_t_16_q_0_avoid_conflicts,
-            pool_t_32_q_0_avoid_conflicts,
+            // pool_t_2_q_0_avoid_conflicts,
+            // pool_t_4_q_0_avoid_conflicts,
+            // pool_t_8_q_0_avoid_conflicts,
+            // pool_t_16_q_0_avoid_conflicts,
+            // pool_t_32_q_0_avoid_conflicts,
             pool_t_2_q_0_read_uncommitted,
             pool_t_4_q_0_read_uncommitted,
             pool_t_8_q_0_read_uncommitted,
