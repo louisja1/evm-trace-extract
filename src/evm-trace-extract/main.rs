@@ -13,7 +13,7 @@ trait BlockDataStream: stream::Stream<Item = (u64, (Vec<U256>, Vec<rpc::TxInfo>)
 impl<T> BlockDataStream for T where T: stream::Stream<Item = (u64, (Vec<U256>, Vec<rpc::TxInfo>))> {}
 
 async fn occ_detailed_stats(trace_db: &DB, stream: impl BlockDataStream + Unpin) {
-    println!("block,num_txs,num_conflicts,serial_gas_cost,pool_t_2,pool_t_4,pool_t_8,pool_t_16,pool_t_32,optimal_t_2,optimal_t_4,optimal_t_8,optimal_t_16,optimal_t_32");
+    println!("block,num_txs,num_conflicts,serial_gas_cost,pool_t_2,pool_t_4,pool_t_8,pool_t_16,pool_t_32,optimal_t_2,optimal_t_4,optimal_t_8,optimal_t_16,optimal_t_32,longest_path,longest_path_cost");
 
     let chunk_size = 3;
     let mut stream = stream.chunks(chunk_size);
@@ -64,14 +64,22 @@ async fn occ_detailed_stats(trace_db: &DB, stream: impl BlockDataStream + Unpin)
         let optimal_t_16 = graph.cost(&gas, 16);
         let optimal_t_32 = graph.cost(&gas, 32);
 
+        let (longest_path_cost, longest_path) = graph.longest_path(&gas);
+
         let block = blocks
             .into_iter()
             .map(|b| b.to_string())
             .collect::<Vec<String>>()
             .join("-");
 
+        let longest_path = longest_path
+            .into_iter()
+            .map(|b| b.to_string())
+            .collect::<Vec<String>>()
+            .join("-");
+
         println!(
-            "{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
             block,
             num_txs,
             num_conflicts,
@@ -86,6 +94,8 @@ async fn occ_detailed_stats(trace_db: &DB, stream: impl BlockDataStream + Unpin)
             optimal_t_8,
             optimal_t_16,
             optimal_t_32,
+            longest_path,
+            longest_path_cost,
         );
     }
 }

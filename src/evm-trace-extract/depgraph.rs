@@ -152,6 +152,36 @@ impl DependencyGraph {
 
         cost
     }
+
+    #[allow(dead_code)]
+    pub fn longest_path(&self, gas: &Vec<U256>) -> (U256, Vec<usize>) {
+        let num_txs = gas.len();
+        let max_cost_from = self.max_costs(gas);
+
+        let mut tx = match (0..num_txs).max_by_key(|tx| max_cost_from[tx]) {
+            None => return (U256::from(0), vec![]),
+            Some(tx) => tx,
+        };
+
+        let expected_cost = max_cost_from[&tx];
+
+        let mut cost = gas[tx];
+        let mut path = vec![tx];
+
+        while let Some(txs) = self.successors_of.get(&tx) {
+            // find successor with maximum cost
+            tx = match txs.iter().max_by_key(|tx| max_cost_from[tx]) {
+                None => break,
+                Some(tx) => *tx,
+            };
+
+            cost += gas[tx];
+            path.push(tx);
+        }
+
+        assert_eq!(cost, expected_cost);
+        (cost, path)
+    }
 }
 
 #[allow(dead_code)]
