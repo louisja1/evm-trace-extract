@@ -6,6 +6,9 @@ mod occ;
 use futures::{future, stream, FutureExt, StreamExt};
 use rocksdb::DB;
 use rustop::opts;
+use std::collections::HashSet;
+use std::fs::File;
+use std::io::{self, prelude::*, BufReader};
 use web3::types::U256;
 
 // define a "trait alias" (see https://www.worthe-it.co.za/blog/2017-01-15-aliasing-traits-in-rust.html)
@@ -13,7 +16,18 @@ trait BlockDataStream: stream::Stream<Item = (u64, (Vec<U256>, Vec<rpc::TxInfo>)
 impl<T> BlockDataStream for T where T: stream::Stream<Item = (u64, (Vec<U256>, Vec<rpc::TxInfo>))> {}
 
 async fn occ_detailed_stats(trace_db: &DB, stream: impl BlockDataStream + Unpin) {
-    println!("block,num_txs,num_conflicts,serial_gas_cost,pool_t_2,pool_t_4,pool_t_8,pool_t_16,pool_t_32,pool_t_2_ignore_slots,pool_t_4_ignore_slots,pool_t_8_ignore_slots,pool_t_16_ignore_slots,pool_t_32_ignore_slots,pool_t_2_read_uncommitted,pool_t_4_read_uncommitted,pool_t_8_read_uncommitted,pool_t_16_read_uncommitted,pool_t_32_read_uncommitted,optimal_t_2,optimal_t_4,optimal_t_8,optimal_t_16,optimal_t_32,longest_path,longest_path_cost");
+    // println!("block,num_txs,num_conflicts,serial_gas_cost,pool_t_2,pool_t_4,pool_t_8,pool_t_16,pool_t_32,pool_t_2_ignore_slots,pool_t_4_ignore_slots,pool_t_8_ignore_slots,pool_t_16_ignore_slots,pool_t_32_ignore_slots,pool_t_2_read_uncommitted,pool_t_4_read_uncommitted,pool_t_8_read_uncommitted,pool_t_16_read_uncommitted,pool_t_32_read_uncommitted,optimal_t_2,optimal_t_4,optimal_t_8,optimal_t_16,optimal_t_32,longest_path,longest_path_cost");
+    println!("block,num_txs,num_conflicts,serial_gas_cost,optimal_t_2,optimal_t_4,optimal_t_8,optimal_t_16,optimal_t_32,longest_path,longest_path_cost");
+
+    ////////////////////
+    let file = File::open("ignore-addresses.txt").unwrap();
+    let reader = BufReader::new(file);
+
+    let ignore = reader
+        .lines()
+        .map(Result::unwrap)
+        .collect::<HashSet<String>>();
+    ////////////////////
 
     let chunk_size = 3;
     let mut stream = stream.chunks(chunk_size);
@@ -38,41 +52,41 @@ async fn occ_detailed_stats(trace_db: &DB, stream: impl BlockDataStream + Unpin)
         let num_conflicts = occ::num_conflicts(&txs);
         let serial = gas.iter().fold(U256::from(0), |acc, item| acc + item);
 
-        let occ = |num_threads| {
-            occ::thread_pool(
-                &txs,
-                &gas,
-                &info,
-                num_threads,
-                false, // allow_ignore_slots
-                false, // allow_avoid_conflicts_during_scheduling
-                false, // allow_read_from_uncommitted
-            )
-        };
+        // let occ = |num_threads| {
+        //     occ::thread_pool(
+        //         &txs,
+        //         &gas,
+        //         &info,
+        //         num_threads,
+        //         false, // allow_ignore_slots
+        //         false, // allow_avoid_conflicts_during_scheduling
+        //         false, // allow_read_from_uncommitted
+        //     )
+        // };
 
-        let pool_t_2_q_0 = occ(2);
-        let pool_t_4_q_0 = occ(4);
-        let pool_t_8_q_0 = occ(8);
-        let pool_t_16_q_0 = occ(16);
-        let pool_t_32_q_0 = occ(32);
+        // let pool_t_2_q_0 = occ(2);
+        // let pool_t_4_q_0 = occ(4);
+        // let pool_t_8_q_0 = occ(8);
+        // let pool_t_16_q_0 = occ(16);
+        // let pool_t_32_q_0 = occ(32);
 
-        let occ = |num_threads| {
-            occ::thread_pool(
-                &txs,
-                &gas,
-                &info,
-                num_threads,
-                true,  // allow_ignore_slots
-                false, // allow_avoid_conflicts_during_scheduling
-                false, // allow_read_from_uncommitted
-            )
-        };
+        // let occ = |num_threads| {
+        //     occ::thread_pool(
+        //         &txs,
+        //         &gas,
+        //         &info,
+        //         num_threads,
+        //         true,  // allow_ignore_slots
+        //         false, // allow_avoid_conflicts_during_scheduling
+        //         false, // allow_read_from_uncommitted
+        //     )
+        // };
 
-        let pool_t_2_q_0_ignore_slots = occ(2);
-        let pool_t_4_q_0_ignore_slots = occ(4);
-        let pool_t_8_q_0_ignore_slots = occ(8);
-        let pool_t_16_q_0_ignore_slots = occ(16);
-        let pool_t_32_q_0_ignore_slots = occ(32);
+        // let pool_t_2_q_0_ignore_slots = occ(2);
+        // let pool_t_4_q_0_ignore_slots = occ(4);
+        // let pool_t_8_q_0_ignore_slots = occ(8);
+        // let pool_t_16_q_0_ignore_slots = occ(16);
+        // let pool_t_32_q_0_ignore_slots = occ(32);
 
         // let occ = |num_threads| {
         //     occ::thread_pool(
@@ -92,25 +106,25 @@ async fn occ_detailed_stats(trace_db: &DB, stream: impl BlockDataStream + Unpin)
         // let pool_t_16_q_0_avoid_conflicts = occ(16);
         // let pool_t_32_q_0_avoid_conflicts = occ(32);
 
-        let occ = |num_threads| {
-            occ::thread_pool(
-                &txs,
-                &gas,
-                &info,
-                num_threads,
-                false, // allow_ignore_slots
-                false, // allow_avoid_conflicts_during_scheduling
-                true,  // allow_read_from_uncommitted
-            )
-        };
+        // let occ = |num_threads| {
+        //     occ::thread_pool(
+        //         &txs,
+        //         &gas,
+        //         &info,
+        //         num_threads,
+        //         false, // allow_ignore_slots
+        //         false, // allow_avoid_conflicts_during_scheduling
+        //         true,  // allow_read_from_uncommitted
+        //     )
+        // };
 
-        let pool_t_2_q_0_read_uncommitted = occ(2);
-        let pool_t_4_q_0_read_uncommitted = occ(4);
-        let pool_t_8_q_0_read_uncommitted = occ(8);
-        let pool_t_16_q_0_read_uncommitted = occ(16);
-        let pool_t_32_q_0_read_uncommitted = occ(32);
+        // let pool_t_2_q_0_read_uncommitted = occ(2);
+        // let pool_t_4_q_0_read_uncommitted = occ(4);
+        // let pool_t_8_q_0_read_uncommitted = occ(8);
+        // let pool_t_16_q_0_read_uncommitted = occ(16);
+        // let pool_t_32_q_0_read_uncommitted = occ(32);
 
-        let graph = depgraph::DependencyGraph::from(&txs);
+        let graph = depgraph::DependencyGraph::from(&txs, &ignore);
 
         let optimal_t_2 = graph.cost(&gas, 2);
         let optimal_t_4 = graph.cost(&gas, 4);
@@ -133,31 +147,32 @@ async fn occ_detailed_stats(trace_db: &DB, stream: impl BlockDataStream + Unpin)
             .join("-");
 
         println!(
-            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+            // "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+            "{},{},{},{},{},{},{},{},{},{},{}",
             block,
             num_txs,
             num_conflicts,
             serial,
-            pool_t_2_q_0,
-            pool_t_4_q_0,
-            pool_t_8_q_0,
-            pool_t_16_q_0,
-            pool_t_32_q_0,
-            pool_t_2_q_0_ignore_slots,
-            pool_t_4_q_0_ignore_slots,
-            pool_t_8_q_0_ignore_slots,
-            pool_t_16_q_0_ignore_slots,
-            pool_t_32_q_0_ignore_slots,
+            // pool_t_2_q_0,
+            // pool_t_4_q_0,
+            // pool_t_8_q_0,
+            // pool_t_16_q_0,
+            // pool_t_32_q_0,
+            // pool_t_2_q_0_ignore_slots,
+            // pool_t_4_q_0_ignore_slots,
+            // pool_t_8_q_0_ignore_slots,
+            // pool_t_16_q_0_ignore_slots,
+            // pool_t_32_q_0_ignore_slots,
             // pool_t_2_q_0_avoid_conflicts,
             // pool_t_4_q_0_avoid_conflicts,
             // pool_t_8_q_0_avoid_conflicts,
             // pool_t_16_q_0_avoid_conflicts,
             // pool_t_32_q_0_avoid_conflicts,
-            pool_t_2_q_0_read_uncommitted,
-            pool_t_4_q_0_read_uncommitted,
-            pool_t_8_q_0_read_uncommitted,
-            pool_t_16_q_0_read_uncommitted,
-            pool_t_32_q_0_read_uncommitted,
+            // pool_t_2_q_0_read_uncommitted,
+            // pool_t_4_q_0_read_uncommitted,
+            // pool_t_8_q_0_read_uncommitted,
+            // pool_t_16_q_0_read_uncommitted,
+            // pool_t_32_q_0_read_uncommitted,
             optimal_t_2,
             optimal_t_4,
             optimal_t_8,

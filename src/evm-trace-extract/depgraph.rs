@@ -2,13 +2,17 @@ use crate::transaction_info::{Access, AccessMode, Target, TransactionInfo};
 use std::collections::{HashMap, HashSet};
 use web3::types::U256;
 
-fn is_wr_conflict(first: &TransactionInfo, second: &TransactionInfo) -> bool {
+fn is_wr_conflict(first: &TransactionInfo, second: &TransactionInfo, ignore: &HashSet<String>) -> bool {
     for acc in second
         .accesses
         .iter()
         .filter(|a| a.mode == AccessMode::Read)
     {
         if let Target::Storage(addr, entry) = &acc.target {
+            if ignore.contains(addr) {
+                continue;
+            }
+
             if first.accesses.contains(&Access::storage_write(addr, entry)) {
                 return true;
             }
@@ -25,13 +29,13 @@ pub struct DependencyGraph {
 }
 
 impl DependencyGraph {
-    pub fn from(txs: &Vec<TransactionInfo>) -> DependencyGraph {
+    pub fn from(txs: &Vec<TransactionInfo>, ignore: &HashSet<String>) -> DependencyGraph {
         let mut predecessors_of = HashMap::<usize, Vec<usize>>::new();
         let mut successors_of = HashMap::<usize, Vec<usize>>::new();
 
         for first in 0..(txs.len().saturating_sub(1)) {
             for second in (first + 1)..txs.len() {
-                if is_wr_conflict(&txs[first], &txs[second]) {
+                if is_wr_conflict(&txs[first], &txs[second], &ignore) {
                     predecessors_of.entry(second).or_insert(vec![]).push(first);
                     successors_of.entry(first).or_insert(vec![]).push(second);
                 }
@@ -185,8 +189,8 @@ impl DependencyGraph {
 }
 
 #[allow(dead_code)]
-pub fn cost(txs: &Vec<TransactionInfo>, gas: &Vec<U256>, num_threads: usize) -> U256 {
-    DependencyGraph::from(txs).cost(gas, num_threads)
+pub fn cost(txs: &Vec<TransactionInfo>, gas: &Vec<U256>, num_threads: usize, ignore: &HashSet<String>) -> U256 {
+    DependencyGraph::from(txs, ignore).cost(gas, num_threads)
 }
 
 #[cfg(test)]
