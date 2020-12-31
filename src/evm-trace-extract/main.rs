@@ -8,7 +8,7 @@ use rocksdb::DB;
 use rustop::opts;
 use std::collections::HashSet;
 use std::fs::File;
-use std::io::{self, prelude::*, BufReader};
+use std::io::{prelude::*, BufReader};
 use web3::types::U256;
 
 // define a "trait alias" (see https://www.worthe-it.co.za/blog/2017-01-15-aliasing-traits-in-rust.html)
@@ -124,7 +124,7 @@ async fn occ_detailed_stats(trace_db: &DB, stream: impl BlockDataStream + Unpin)
         // let pool_t_16_q_0_read_uncommitted = occ(16);
         // let pool_t_32_q_0_read_uncommitted = occ(32);
 
-        let graph = depgraph::DependencyGraph::from(&txs, &ignore);
+        let graph = depgraph::DependencyGraph::from(&txs, &info, &ignore);
 
         let optimal_t_2 = graph.cost(&gas, 2);
         let optimal_t_4 = graph.cost(&gas, 4);
