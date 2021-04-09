@@ -25,29 +25,35 @@ async fn occ_detailed_stats(trace_db: &DB, mut stream: impl BlockDataStream + Un
         let num_conflicts = occ::num_conflicts(&txs);
         let serial = gas.iter().fold(U256::from(0), |acc, item| acc + item);
 
-        let occ = |num_threads| {
-            occ::thread_pool(
-                &txs,
-                &gas,
-                &info,
-                num_threads,
-                false, // allow_ignore_slots
-                false, // allow_avoid_conflicts_during_scheduling
-                false, // allow_read_from_uncommitted
-            )
-        };
+        // let occ = |num_threads| {
+        //     occ::thread_pool(
+        //         &txs,
+        //         &gas,
+        //         &info,
+        //         num_threads,
+        //         false, // allow_ignore_slots
+        //         false, // allow_avoid_conflicts_during_scheduling
+        //         false, // allow_read_from_uncommitted
+        //     )
+        // };
 
-        let pool_t_2_q_0 = occ(2);
-        let pool_t_4_q_0 = occ(4);
-        let pool_t_8_q_0 = occ(8);
-        let pool_t_16_q_0 = occ(16);
-        let pool_t_all_q_0 = occ(txs.len());
+        // let pool_t_2_q_0 = occ(2);
+        // let pool_t_4_q_0 = occ(4);
+        // let pool_t_8_q_0 = occ(8);
+        // let pool_t_16_q_0 = occ(16);
+        // let pool_t_all_q_0 = occ(txs.len());
 
-        let optimal_t_2 = depgraph::cost(&txs, &gas, 2);
-        let optimal_t_4 = depgraph::cost(&txs, &gas, 4);
-        let optimal_t_8 = depgraph::cost(&txs, &gas, 8);
-        let optimal_t_16 = depgraph::cost(&txs, &gas, 16);
-        let optimal_t_all = depgraph::cost(&txs, &gas, txs.len());
+        let optimal_t_2 = depgraph::cost(&txs, &gas, 2, &info, 0);
+        let optimal_t_4 = depgraph::cost(&txs, &gas, 4, &info, 0);
+        let optimal_t_8 = depgraph::cost(&txs, &gas, 8, &info, 0);
+        let optimal_t_16 = depgraph::cost(&txs, &gas, 16, &info, 0);
+        let optimal_t_all = depgraph::cost(&txs, &gas, txs.len(), &info, 0);
+
+        let optimal_t_2_l_10 = depgraph::cost(&txs, &gas, 2, &info, 10);
+        let optimal_t_4_l_10 = depgraph::cost(&txs, &gas, 4, &info, 10);
+        let optimal_t_8_l_10 = depgraph::cost(&txs, &gas, 8, &info, 10);
+        let optimal_t_16_l_10 = depgraph::cost(&txs, &gas, 16, &info, 10);
+        let optimal_t_all_l_10 = depgraph::cost(&txs, &gas, txs.len(), &info, 10);
 
         println!(
             "{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
@@ -55,16 +61,21 @@ async fn occ_detailed_stats(trace_db: &DB, mut stream: impl BlockDataStream + Un
             num_txs,
             num_conflicts,
             serial,
-            pool_t_2_q_0,
-            pool_t_4_q_0,
-            pool_t_8_q_0,
-            pool_t_16_q_0,
-            pool_t_all_q_0,
+            // pool_t_2_q_0,
+            // pool_t_4_q_0,
+            // pool_t_8_q_0,
+            // pool_t_16_q_0,
+            // pool_t_all_q_0,
             optimal_t_2,
             optimal_t_4,
             optimal_t_8,
             optimal_t_16,
             optimal_t_all,
+            optimal_t_2_l_10,
+            optimal_t_4_l_10,
+            optimal_t_8_l_10,
+            optimal_t_16_l_10,
+            optimal_t_all_l_10,
         );
     }
 }

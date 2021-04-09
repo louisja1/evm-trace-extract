@@ -10,6 +10,7 @@ type Web3 = Web3Generic<transports::Http>;
 
 pub struct TxInfo {
     pub hash: H256,
+    pub from: H160,
     pub to: Option<H160>,
     pub gas_limit: U256,
 }
@@ -129,6 +130,7 @@ pub async fn tx_infos(web3: &Web3, num: u64) -> Result<Option<Vec<TxInfo>>, web3
         txs.iter()
             .map(|tx| TxInfo {
                 hash: tx.hash,
+                from: tx.from,
                 to: tx.to,
                 gas_limit: tx.gas,
             })

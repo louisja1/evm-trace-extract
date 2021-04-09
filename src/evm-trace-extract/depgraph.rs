@@ -1,6 +1,7 @@
 use crate::transaction_info::{Access, AccessMode, Target, TransactionInfo};
+use crate::rpc;
 use std::collections::{HashMap, HashSet};
-use web3::types::U256;
+use web3::types::{U256};
 
 fn is_wr_conflict(first: &TransactionInfo, second: &TransactionInfo) -> bool {
     for acc in second
@@ -25,12 +26,15 @@ struct DependencyGraph {
 }
 
 impl DependencyGraph {
-    pub fn from(txs: &Vec<TransactionInfo>) -> DependencyGraph {
+    pub fn from(txs: &Vec<TransactionInfo>, info: &Vec<rpc::TxInfo>, counter_len: u64) -> DependencyGraph {
         let mut predecessors_of = HashMap::<usize, Vec<usize>>::new();
         let mut successors_of = HashMap::<usize, Vec<usize>>::new();
 
         for first in 0..(txs.len().saturating_sub(1)) {
             for second in (first + 1)..txs.len() {
+                if counter_len > 0 && info[first].from.to_low_u64_be() % counter_len != info[second].from.to_low_u64_be() % counter_len {
+                    continue;
+                }
                 if is_wr_conflict(&txs[first], &txs[second]) {
                     predecessors_of.entry(second).or_insert(vec![]).push(first);
                     successors_of.entry(first).or_insert(vec![]).push(second);
@@ -154,8 +158,8 @@ impl DependencyGraph {
     }
 }
 
-pub fn cost(txs: &Vec<TransactionInfo>, gas: &Vec<U256>, num_threads: usize) -> U256 {
-    DependencyGraph::from(txs).cost(gas, num_threads)
+pub fn cost(txs: &Vec<TransactionInfo>, gas: &Vec<U256>, num_threads: usize, info: &Vec<rpc::TxInfo>, counter_len: u64) -> U256 {
+    DependencyGraph::from(txs, info, counter_len).cost(gas, num_threads)
 }
 
 #[cfg(test)]
