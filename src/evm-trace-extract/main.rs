@@ -41,24 +41,6 @@ async fn occ_detailed_stats(
         let num_conflicts = occ::num_conflicts(&txs);
         let serial = gas.iter().fold(U256::from(0), |acc, item| acc + item);
 
-        let occ = |num_threads| {
-            occ::thread_pool(
-                &txs,
-                &gas,
-                &info,
-                num_threads,
-                false, // allow_ignore_slots
-                false, // allow_avoid_conflicts_during_scheduling
-                false, // allow_read_from_uncommitted
-            )
-        };
-
-        let pool_t_2_q_0 = occ(2);
-        let pool_t_4_q_0 = occ(4);
-        let pool_t_8_q_0 = occ(8);
-        let pool_t_16_q_0 = occ(16);
-        let pool_t_all_q_0 = occ(txs.len());
-
         let graph = depgraph::DependencyGraph::simple(&txs, &info);
 
         let optimal_t_2 = graph.cost(&gas, 2);
@@ -66,6 +48,14 @@ async fn occ_detailed_stats(
         let optimal_t_8 = graph.cost(&gas, 8);
         let optimal_t_16 = graph.cost(&gas, 16);
         let optimal_t_all = graph.cost(&gas, txs.len());
+
+        let graph = depgraph::DependencyGraph::with_sharding(&txs, &info, 30);
+
+        let optimal_t_2_l_30 = graph.cost(&gas, 2);
+        let optimal_t_4_l_30 = graph.cost(&gas, 4);
+        let optimal_t_8_l_30 = graph.cost(&gas, 8);
+        let optimal_t_16_l_30 = graph.cost(&gas, 16);
+        let optimal_t_all_l_30 = graph.cost(&gas, txs.len());
 
         let block = blocks
             .into_iter()
@@ -79,16 +69,16 @@ async fn occ_detailed_stats(
             num_txs,
             num_conflicts,
             serial,
-            pool_t_2_q_0,
-            pool_t_4_q_0,
-            pool_t_8_q_0,
-            pool_t_16_q_0,
-            pool_t_all_q_0,
             optimal_t_2,
             optimal_t_4,
             optimal_t_8,
             optimal_t_16,
             optimal_t_all,
+            optimal_t_2_l_30,
+            optimal_t_4_l_30,
+            optimal_t_8_l_30,
+            optimal_t_16_l_30,
+            optimal_t_all_l_30,
         );
     }
 }
