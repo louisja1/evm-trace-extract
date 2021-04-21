@@ -44,8 +44,8 @@ pub async fn gas_used_parallel(
 
         tokio::spawn(async move {
             match gas_used(&web3, &tx[..]).await {
-                Err(e) => panic!(format!("Failed to retrieve gas for {}: {}", tx, e)),
-                Ok(None) => panic!(format!("Failed to retrieve gas for {}: None", tx)),
+                Err(e) => panic!("Failed to retrieve gas for {}: {}", tx, e),
+                Ok(None) => panic!("Failed to retrieve gas for {}: None", tx),
                 Ok(Some(g)) => g,
             }
         })
@@ -100,7 +100,7 @@ pub fn gas_parity_parallel<'a>(
 
         tokio::spawn(async move {
             match gas_parity(&web3, b).await {
-                Err(e) => panic!(format!("Failed to retrieve gas for {}: {}", b, e)),
+                Err(e) => panic!("Failed to retrieve gas for {}: {}", b, e),
                 Ok(g) => g,
             }
         })
@@ -130,7 +130,7 @@ pub async fn tx_infos(web3: &Web3, num: u64) -> Result<Option<Vec<TxInfo>>, web3
         txs.iter()
             .map(|tx| TxInfo {
                 hash: tx.hash,
-                from: tx.from,
+                from: tx.from.expect("tx.from is not empty"),
                 to: tx.to,
                 gas_limit: tx.gas,
             })
@@ -152,8 +152,8 @@ pub fn tx_infos_parallel<'a>(
 
         tokio::spawn(async move {
             match tx_infos(&web3, b).await {
-                Err(e) => panic!(format!("Failed to retrieve transactions for {}: {}", b, e)),
-                Ok(None) => panic!(format!("Block {} not found", b)),
+                Err(e) => panic!("Failed to retrieve transactions for {}: {}", b, e),
+                Ok(None) => panic!("Block {} not found", b),
                 Ok(Some(receivers)) => receivers,
             }
         })
