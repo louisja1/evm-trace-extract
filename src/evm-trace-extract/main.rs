@@ -17,7 +17,8 @@ async fn occ_detailed_stats(
     batch_size: usize,
     stream: impl BlockDataStream + Unpin,
 ) {
-    println!("block,num_txs,num_conflicts,serial_gas_cost,pool_t_2,pool_t_4,pool_t_8,pool_t_16,pool_t_all,optimal_t_2,optimal_t_4,optimal_t_8,optimal_t_16,optimal_t_all");
+    println!("block,num_txs,num_conflicts,serial_gas_cost,deter_2_cost,deter_4_cost,deter_8_cost,deter_16_cost,deter_all_cost,deter_2_aborts,deter_4_aborts,deter_8_aborts,deter_16_aborts,deter_all_aborts");
+    // println!("block,num_txs,num_conflicts,serial_gas_cost,pool_t_2,pool_t_4,pool_t_8,pool_t_16,pool_t_all,optimal_t_2,optimal_t_4,optimal_t_8,optimal_t_16,optimal_t_all");
 
     let mut stream = stream.chunks(batch_size);
 
@@ -41,7 +42,40 @@ async fn occ_detailed_stats(
         let num_conflicts = occ::num_conflicts(&txs);
         let serial = gas.iter().fold(U256::from(0), |acc, item| acc + item);
 
-        let occ = |num_threads| {
+        let deterministic =
+            |num_threads| occ::deterministic_scheduling(&txs, &gas, &info, num_threads);
+
+        let (deter_2_cost, deter_2_aborts) = deterministic(2);
+        let (deter_4_cost, deter_4_aborts) = deterministic(4);
+        let (deter_8_cost, deter_8_aborts) = deterministic(8);
+        let (deter_16_cost, deter_16_aborts) = deterministic(16);
+        let (deter_all_cost, deter_all_aborts) = deterministic(txs.len());
+
+        let block = blocks
+            .into_iter()
+            .map(|b| b.to_string())
+            .collect::<Vec<String>>()
+            .join("-");
+
+        println!(
+            "{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+            block,
+            num_txs,
+            num_conflicts,
+            serial,
+            deter_2_cost,
+            deter_4_cost,
+            deter_8_cost,
+            deter_16_cost,
+            deter_all_cost,
+            deter_2_aborts,
+            deter_4_aborts,
+            deter_8_aborts,
+            deter_16_aborts,
+            deter_all_aborts,
+        );
+
+        /*let occ = |num_threads| {
             occ::thread_pool(
                 &txs,
                 &gas,
@@ -89,7 +123,7 @@ async fn occ_detailed_stats(
             optimal_t_8,
             optimal_t_16,
             optimal_t_all,
-        );
+        );*/
     }
 }
 
