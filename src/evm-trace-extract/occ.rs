@@ -168,12 +168,14 @@ pub fn deterministic_scheduling(
 
     // transaction queue: transactions waiting to be executed
     // item: <(storage-version, transaction-id)>
+    // pop() always returns the lowest storage-version
+    let mut tx_queue: MinHeap<(i32, usize)> =
+        (0..txs.len()).map(|tx_id| Reverse((-1, tx_id))).collect();
+
+    // transaction ready to schedule : txns have less or equal storage version than the current committed storage version
+    // item: <(transaction-id, storage-version)>
     // pop() always returns the lowest transaction-id
-    let mut tx_queue: MinHeap<(i32, usize)> = Default::default();
-    for tx_id in 0..txs.len() {
-        // new sv \in [-1, tx_id)
-        tx_queue.push(Reverse((-1, tx_id)));
-    }
+    let mut tx_ready_to_schedule: MinHeap<(usize, i32)> = Default::default();
 
     // commit queue: txs that finished execution and are waiting to commit
     // item: <transaction-id, storage-version>
@@ -185,7 +187,7 @@ pub fn deterministic_scheduling(
     let mut next_to_commit = 0;
 
     // thread pool: information on current execution on each thread
-    // item: < gas-left, transaction-id, storage-version> or None if idle
+    // item: < gas-left, transaction-id, storage-version>
     // pop() always returns the least gas-left
     let mut threads: MinHeap<(U256, usize, i32)> = Default::default();
 
@@ -204,7 +206,10 @@ pub fn deterministic_scheduling(
         if next_to_commit == txs.len() {
             // we have committed all transactions
             // nothing left to execute or commit
-            assert!(tx_queue.is_empty(), "tx queue not empty");
+            assert!(
+                tx_queue.is_empty() && tx_ready_to_schedule.is_empty(),
+                "tx queue not empty"
+            );
             assert!(commit_queue.is_empty(), "commit queue not empty");
 
             // all threads are idle
@@ -214,8 +219,23 @@ pub fn deterministic_scheduling(
         }
 
         // ---------------- scheduling ----------------
+        // push prepared txs to tx_ready_to_schedule from tx_queue
+        while let Some(Reverse((sv, tx_id))) = tx_queue.pop() {
+            if sv > next_to_commit as i32 - 1 {
+                tx_queue.push(Reverse((sv, tx_id)));
+                break;
+            }
+            log::trace!("[{}] (tx-{}, sv({})) is ready for scheduling", N, tx_id, sv);
+            tx_ready_to_schedule.push(Reverse((tx_id, sv)));
+        }
+
         log::trace!("[{}] threads before scheduling: {:?}", N, threads);
         log::trace!("[{}] tx queue before scheduling: {:?}", N, tx_queue);
+        log::trace!(
+            "[{}] txs ready for scheduling: {:?}",
+            N,
+            tx_ready_to_schedule
+        );
         log::trace!("[{}] commit queue before scheduling: {:?}", N, commit_queue);
 
         'schedule: loop {
@@ -225,19 +245,7 @@ pub fn deterministic_scheduling(
             }
 
             // get tx from tx_queue
-            if let Some(Reverse((sv, tx_id))) = tx_queue.pop() {
-                if sv > next_to_commit as i32 - 1 {
-                    log::trace!(
-                        "[{}] the lowest sv[{}] of tx-{} > current sv[{}]",
-                        N,
-                        sv,
-                        tx_id,
-                        next_to_commit - 1
-                    );
-                    tx_queue.push(Reverse((sv, tx_id)));
-                    break 'schedule;
-                }
-
+            if let Some(Reverse((tx_id, sv))) = tx_ready_to_schedule.pop() {
                 log::trace!(
                     "[{}] attempting to schedule tx-{} ({})...",
                     N,
@@ -254,7 +262,6 @@ pub fn deterministic_scheduling(
                 );
 
                 let gas_left = gas[tx_id];
-                let sv = next_to_commit as i32 - 1;
 
                 threads.push(Reverse((gas_left, tx_id, sv)));
             } else {
@@ -357,7 +364,7 @@ pub fn deterministic_scheduling(
             // re-schedule aborted tx
             num_aborts += U256::from(1);
             // new sv \in [-1, tx_id), use random here
-            tx_queue.push(Reverse((-1, tx_id)));
+            tx_queue.push(Reverse((sv + 1, tx_id)));
         }
 
         N += 1;
