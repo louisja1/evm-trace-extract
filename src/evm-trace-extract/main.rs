@@ -17,7 +17,7 @@ async fn occ_detailed_stats(
     batch_size: usize,
     stream: impl BlockDataStream + Unpin,
 ) {
-    println!("block,num_txs,num_conflicts,serial_gas_cost,deter_2_cost,deter_4_cost,deter_8_cost,deter_16_cost,deter_all_cost,deter_2_aborts,deter_4_aborts,deter_8_aborts,deter_16_aborts,deter_all_aborts");
+    println!("block,num_txs,num_conflicts,serial_gas_cost,(deter_t_2_cost,deter_t_2_aborts),(deter_t_4_cost,deter_t_4_aborts),(deter_t_8_cost,deter_t_8_aborts),(deter_t_16_cost,deter_t_16_aborts),(deter_t_all_cost,deter_t_all_aborts),(deter_t_2_early_cost,deter_t_2_early_aborts),(deter_t_4_early_cost,deter_t_4_early_aborts),(deter_t_8_early_cost,deter_t_8_early_aborts),(deter_t_16_early_cost,deter_t_16_early_aborts),(deter_t_all_early_cost,deter_t_all_early_aborts)");
     // println!("block,num_txs,num_conflicts,serial_gas_cost,pool_t_2,pool_t_4,pool_t_8,pool_t_16,pool_t_all,optimal_t_2,optimal_t_4,optimal_t_8,optimal_t_16,optimal_t_all");
 
     let mut stream = stream.chunks(batch_size);
@@ -42,14 +42,27 @@ async fn occ_detailed_stats(
         let num_conflicts = occ::num_conflicts(&txs);
         let serial = gas.iter().fold(U256::from(0), |acc, item| acc + item);
 
-        let deterministic =
-            |num_threads| occ::deterministic_scheduling(&txs, &gas, &info, num_threads);
+        let deterministic = |num_threads, allow_check_conflicts_before_commit| {
+            occ::deterministic_scheduling(
+                &txs,
+                &gas,
+                &info,
+                num_threads,
+                allow_check_conflicts_before_commit,
+            )
+        };
 
-        let (deter_2_cost, deter_2_aborts) = deterministic(2);
-        let (deter_4_cost, deter_4_aborts) = deterministic(4);
-        let (deter_8_cost, deter_8_aborts) = deterministic(8);
-        let (deter_16_cost, deter_16_aborts) = deterministic(16);
-        let (deter_all_cost, deter_all_aborts) = deterministic(txs.len());
+        let (deter_t_2_cost, deter_t_2_aborts) = deterministic(2, false);
+        let (deter_t_4_cost, deter_t_4_aborts) = deterministic(4, false);
+        let (deter_t_8_cost, deter_t_8_aborts) = deterministic(8, false);
+        let (deter_t_16_cost, deter_t_16_aborts) = deterministic(16, false);
+        let (deter_t_all_cost, deter_t_all_aborts) = deterministic(txs.len(), false);
+
+        let (deter_t_2_early_cost, deter_t_2_early_aborts) = deterministic(2, true);
+        let (deter_t_4_early_cost, deter_t_4_early_aborts) = deterministic(4, true);
+        let (deter_t_8_early_cost, deter_t_8_early_aborts) = deterministic(8, true);
+        let (deter_t_16_early_cost, deter_t_16_early_aborts) = deterministic(16, true);
+        let (deter_t_all_early_cost, deter_t_all_early_aborts) = deterministic(txs.len(), true);
 
         let block = blocks
             .into_iter()
@@ -58,21 +71,31 @@ async fn occ_detailed_stats(
             .join("-");
 
         println!(
-            "{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+            "{},{},{},{},({},{}),({},{}),({},{}),({},{}),({},{}),({},{}),({},{}),({},{}),({},{}),({},{})",
             block,
             num_txs,
             num_conflicts,
             serial,
-            deter_2_cost,
-            deter_4_cost,
-            deter_8_cost,
-            deter_16_cost,
-            deter_all_cost,
-            deter_2_aborts,
-            deter_4_aborts,
-            deter_8_aborts,
-            deter_16_aborts,
-            deter_all_aborts,
+            deter_t_2_cost,
+            deter_t_2_aborts,
+            deter_t_4_cost,
+            deter_t_4_aborts,
+            deter_t_8_cost,
+            deter_t_8_aborts,
+            deter_t_16_cost,
+            deter_t_16_aborts,
+            deter_t_all_cost,
+            deter_t_all_aborts,
+            deter_t_2_early_cost,
+            deter_t_2_early_aborts,
+            deter_t_4_early_cost,
+            deter_t_4_early_aborts,
+            deter_t_8_early_cost,
+            deter_t_8_early_aborts,
+            deter_t_16_early_cost,
+            deter_t_16_early_aborts,
+            deter_t_all_early_cost,
+            deter_t_all_early_aborts,
         );
 
         /*let occ = |num_threads| {

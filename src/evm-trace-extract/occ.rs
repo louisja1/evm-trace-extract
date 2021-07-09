@@ -161,6 +161,8 @@ pub fn deterministic_scheduling(
     gas: &Vec<U256>,
     _info: &Vec<rpc::TxInfo>,
     num_threads: usize,
+
+    allow_check_conflicts_before_commit: bool,
 ) -> (U256, U256) {
     assert_eq!(txs.len(), gas.len());
 
@@ -198,6 +200,33 @@ pub fn deterministic_scheduling(
     let mut N = 0;
 
     let mut num_aborts = U256::from(0);
+
+    // just for checking RW-conflict between a to-commit txn(R) and a just-executed txn(W)
+    let is_wr_conflict = |executed: usize, to_commit: usize| {
+        for acc in txs[to_commit]
+            .accesses
+            .iter()
+            .filter(|a| a.mode == AccessMode::Read)
+        {
+            if let Target::Storage(addr, entry) = &acc.target {
+                if txs[executed]
+                    .accesses
+                    .contains(&Access::storage_write(addr, entry))
+                {
+                    log::trace!(
+                        "tx-{}/tx-{} wr conflict on {}-{}",
+                        executed,
+                        to_commit,
+                        addr,
+                        entry
+                    );
+                    return true;
+                }
+            }
+        }
+
+        false
+    };
 
     log::trace!("-----------------------------------------");
 
@@ -280,6 +309,19 @@ pub fn deterministic_scheduling(
                 &txs[tx_id].tx_hash[0..8],
                 gas_step
             );
+            if allow_check_conflicts_before_commit {
+                let mut old_commit_queue: MinHeap<(usize, i32)> = commit_queue.clone();
+                commit_queue.clear();
+                while let Some(Reverse((c_id, c_sv))) = old_commit_queue.pop() {
+                    if ((tx_id as i32) > c_sv) && (tx_id < c_id) && (is_wr_conflict(tx_id, c_id)) {
+                        // re-schedule aborted tx
+                        num_aborts += U256::from(1);
+                        tx_queue.push(Reverse((c_id as i32 - 1, c_id)));
+                    } else {
+                        commit_queue.push(Reverse((c_id, c_sv)));
+                    }
+                }
+            }
 
             // finish executing tx, update thread states
             commit_queue.push(Reverse((tx_id, sv)));
@@ -327,6 +369,18 @@ pub fn deterministic_scheduling(
 
             let Reverse((tx_id, sv)) = commit_queue.pop().unwrap();
 
+            // if allow check conflicts before commit, we skip the unnecessary conflicts' check below
+            if allow_check_conflicts_before_commit {
+                log::trace!(
+                    "[{}] COMMIT tx-{} ({})",
+                    N,
+                    tx_id,
+                    &txs[tx_id].tx_hash[0..8]
+                );
+                next_to_commit += 1;
+                continue;
+            }
+
             // check all potentially conflicting transactions
             // e.g. if tx-3 was executed with sv = -1, it means that it cannot see writes by tx-0, tx-1, tx-2
             let conflict_from = usize::try_from(sv + 1).expect("sv + 1 should be non-negative");
@@ -363,8 +417,7 @@ pub fn deterministic_scheduling(
 
             // re-schedule aborted tx
             num_aborts += U256::from(1);
-            // new sv \in [-1, tx_id), use random here
-            tx_queue.push(Reverse((sv + 1, tx_id)));
+            tx_queue.push(Reverse((tx_id as i32 - 1, tx_id)));
         }
 
         N += 1;
